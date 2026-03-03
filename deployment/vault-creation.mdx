@@ -1,0 +1,273 @@
+---
+title: Vault creation process
+description: Step-by-step guide to creating and deploying a Morpho Vault V2
+---
+
+This guide walks through the complete process of creating a new Morpho Vault V2, from deployment through initial configuration.
+
+## Prerequisites
+
+Before creating a vault, ensure you have:
+
+- Access to a deployed `VaultV2Factory` contract
+- The address of the ERC20 asset token for your vault
+- Sufficient ETH for gas fees
+- A wallet with signing capabilities
+
+<Note>
+The asset token must be ERC20 compliant and should not:
+- Have fees on transfer
+- Revert on transfer to self
+- Rebalance accounts on transfer
+- Re-enter the vault during transfers
+</Note>
+
+## Deployment steps
+
+<Steps>
+  <Step title="Choose deployment parameters">
+    Select the parameters for your vault deployment:
+
+    ```solidity
+    address owner = 0x...; // Your address or multisig
+    address asset = 0x...; // ERC20 token address (e.g., USDC)
+    bytes32 salt = keccak256("my-unique-identifier");
+    ```
+
+    The `owner` will have full administrative control over the vault. Consider using a multisig or governance contract for production deployments.
+
+    The `salt` can be any bytes32 value. Using a descriptive hash helps with address prediction and organization:
+
+    ```solidity
+    // Examples of salt generation
+    bytes32 salt1 = keccak256("morpho-usdc-vault-1");
+    bytes32 salt2 = bytes32(uint256(1)); // Simple incrementing
+    bytes32 salt3 = keccak256(abi.encodePacked(block.timestamp, msg.sender));
+    ```
+  </Step>
+
+  <Step title="Deploy through factory">
+    Call the factory's `createVaultV2` function:
+
+    <CodeGroup>
+
+    ```solidity Solidity
+    IVaultV2Factory factory = IVaultV2Factory(factoryAddress);
+    address vaultAddress = factory.createVaultV2(owner, asset, salt);
+    ```
+
+    ```javascript JavaScript (Ethers v6)
+    const tx = await factory.createVaultV2(owner, asset, salt);
+    const receipt = await tx.wait();
+    
+    // Extract vault address from event
+    const event = receipt.logs.find(
+      log => log.fragment.name === 'CreateVaultV2'
+    );
+    const vaultAddress = event.args.newVaultV2;
+    ```
+
+    ```bash Cast (CLI)
+    cast send $FACTORY_ADDRESS \
+      "createVaultV2(address,address,bytes32)" \
+      $OWNER \
+      $ASSET \
+      $SALT \
+      --private-key $PRIVATE_KEY
+    ```
+
+    </CodeGroup>
+  </Step>
+
+  <Step title="Verify deployment">
+    Confirm the vault was deployed correctly:
+
+    ```solidity
+    // Check factory registry
+    require(factory.isVaultV2(vaultAddress), "Not a factory vault");
+    require(factory.vaultV2(owner, asset, salt) == vaultAddress, "Address mismatch");
+
+    // Verify vault state
+    IVaultV2 vault = IVaultV2(vaultAddress);
+    require(vault.owner() == owner, "Owner mismatch");
+    require(vault.asset() == asset, "Asset mismatch");
+    require(vault.decimals() > 0, "Invalid decimals");
+    ```
+
+    The vault is deployed with default settings:
+    - All timelocks are zero (useful for initial setup)
+    - No name or symbol set
+    - No curator, allocators, or sentinels assigned
+    - No gates (anyone can interact)
+    - No adapters configured
+    - No fees set
+  </Step>
+
+  <Step title="Set vault metadata">
+    Configure the vault's name and symbol (optional but recommended):
+
+    ```solidity
+    vault.setName("Morpho USDC Vault");
+    vault.setSymbol("mUSDC");
+    ```
+
+    <Note>
+    These functions can only be called by the vault owner.
+    </Note>
+  </Step>
+
+  <Step title="Configure initial roles">
+    Set up the vault's role structure. Since timelocks are initially zero, you can set these immediately:
+
+    ```solidity
+    // Set curator (manages vault configuration)
+    vault.setCurator(curatorAddress);
+
+    // Set allocators (manage capital allocation)
+    bytes memory data = abi.encodeWithSelector(
+        vault.setIsAllocator.selector,
+        allocatorAddress,
+        true
+    );
+    vault.submit(data);
+    // Execute immediately (timelock is 0)
+    (bool success,) = address(vault).call(data);
+    require(success);
+
+    // Set sentinels (can decrease caps and revoke pending changes)
+    vault.setIsSentinel(sentinelAddress, true);
+    ```
+
+    See the [Configuration guide](/deployment/configuration) for detailed role descriptions.
+  </Step>
+
+  <Step title="Configure timelocks (recommended)">
+    After initial setup, increase timelocks to protect against malicious changes:
+
+    ```solidity
+    // Example: 24 hour timelock for sensitive operations
+    uint256 timelock24h = 24 hours;
+
+    bytes memory timelockData = abi.encodeWithSelector(
+        vault.increaseTimelock.selector,
+        vault.addAdapter.selector,
+        timelock24h
+    );
+    vault.submit(timelockData);
+    // Execute immediately since increaseTimelock has 0 timelock initially
+    (bool success,) = address(vault).call(timelockData);
+    require(success);
+    ```
+
+    <Warning>
+    Once timelocks are increased, they can only be decreased through the timelock period of the function being modified. Plan your timelock strategy carefully.
+    </Warning>
+  </Step>
+</Steps>
+
+## Understanding vault initialization
+
+When a vault is deployed, the constructor performs several critical setup steps:
+
+```solidity VaultV2.sol constructor
+constructor(address _owner, address _asset) {
+    asset = _asset;
+    owner = _owner;
+    lastUpdate = uint64(block.timestamp);
+    uint256 assetDecimals = IERC20(_asset).decimals();
+    uint256 decimalOffset = uint256(18).zeroFloorSub(assetDecimals);
+    decimals = uint8(assetDecimals + decimalOffset);
+    virtualShares = 10 ** decimalOffset;
+    emit EventsLib.Constructor(_owner, _asset);
+}
+```
+
+### Key initialization details
+
+- **Immutable asset**: The asset token address cannot be changed after deployment
+- **Decimal handling**: Vault shares use the asset decimals plus an offset for inflation protection
+- **Virtual shares**: Added to prevent inflation attacks (1 virtual share for tokens with 18 decimals)
+- **Last update timestamp**: Set to deployment block timestamp for interest calculations
+
+### Decimal offset mechanism
+
+The vault adds a decimal offset to protect against inflation attacks:
+
+| Asset decimals | Decimal offset | Vault decimals | Virtual shares |
+|----------------|----------------|----------------|----------------|
+| 18 (e.g., DAI) | 0              | 18             | 1              |
+| 6 (e.g., USDC) | 12             | 18             | 10^12          |
+| 8 (e.g., WBTC) | 10             | 18             | 10^10          |
+
+<Note>
+The decimal offset ensures that for low-decimal tokens, small donations cannot significantly inflate the share price.
+</Note>
+
+## Post-deployment checklist
+
+After deploying your vault, verify:
+
+- [ ] Owner address is correct (preferably a multisig)
+- [ ] Asset address matches the intended token
+- [ ] Name and symbol are set (if desired)
+- [ ] Curator is assigned
+- [ ] Initial allocators are configured
+- [ ] Sentinels are set up (if using)
+- [ ] Timelocks are configured for protection
+- [ ] Gates are configured (if restricting access)
+
+## Common patterns
+
+### Pattern 1: Quick setup for testing
+
+```solidity
+// Deploy with minimal configuration
+address vault = factory.createVaultV2(owner, asset, bytes32(uint256(1)));
+IVaultV2(vault).setName("Test Vault");
+IVaultV2(vault).setSymbol("TEST");
+// Ready for testing
+```
+
+### Pattern 2: Production deployment with governance
+
+```solidity
+// Deploy with multisig owner
+address multisig = 0x...; // 3/5 multisig
+address vault = factory.createVaultV2(multisig, asset, salt);
+
+// From multisig: set curator to dedicated role
+vault.setCurator(dedicatedCurator);
+
+// From curator: configure with timelocks
+vault.submit(abi.encodeWithSelector(
+    vault.increaseTimelock.selector,
+    vault.addAdapter.selector,
+    7 days
+));
+```
+
+### Pattern 3: Deterministic deployment
+
+```solidity
+// Compute address before deployment
+bytes32 salt = keccak256("my-protocol-usdc-vault");
+address predicted = computeVaultAddress(factory, owner, asset, salt);
+
+// Grant approvals to predicted address
+token.approve(predicted, type(uint256).max);
+
+// Deploy vault (address matches prediction)
+address vault = factory.createVaultV2(owner, asset, salt);
+assert(vault == predicted);
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/deployment/configuration">
+    Configure roles, fees, adapters, and caps
+  </Card>
+  <Card title="Factory reference" icon="factory" href="/deployment/factory">
+    Full VaultV2Factory contract documentation
+  </Card>
+</CardGroup>

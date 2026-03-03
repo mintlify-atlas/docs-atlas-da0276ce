@@ -1,0 +1,508 @@
+---
+title: Key features
+description: Explore Morpho Vault V2's powerful features including timelocks, caps, liquidity management, and non-custodial guarantees
+---
+
+# Key features
+
+Morpho Vault V2 provides a comprehensive feature set designed to balance flexibility, security, and user protection. This page covers the key capabilities that make the protocol unique.
+
+## Timelocks
+
+Timelocks protect depositors by requiring a waiting period before critical configuration changes take effect.
+
+### How timelocks work
+
+1. **Submit**: Curator submits a configuration change
+2. **Wait**: Change becomes executable after the timelock duration
+3. **Execute**: Anyone can execute the pending change
+4. **Exit**: Users can withdraw before execution if they disagree
+
+```solidity
+// From IVaultV2.sol:64
+function submit(bytes memory data) external;
+```
+
+<Info>
+All curator configuration changes are timelockable except `decreaseAbsoluteCap` and `decreaseRelativeCap`, which can be executed immediately for risk reduction.
+</Info>
+
+### Function-specific timelocks
+
+Each function has its own timelock duration:
+
+```solidity
+mapping(bytes4 selector => uint256) public timelock;
+mapping(bytes data => uint256) public executableAt;
+```
+
+**Timelockable functions:**
+
+- `setIsAllocator` - Managing allocator roles
+- `addAdapter` / `removeAdapter` - Enabling/disabling adapters
+- `setAdapterRegistry` - Changing adapter restrictions
+- `increaseAbsoluteCap` / `increaseRelativeCap` - Increasing risk limits
+- `setPerformanceFee` / `setManagementFee` - Changing fees
+- Gate configuration functions
+- And more...
+
+### Changing timelocks
+
+Timelock durations can be modified:
+
+- **Increase**: Can be done immediately (use carefully!)
+- **Decrease**: Requires waiting through the current timelock
+
+```solidity
+function increaseTimelock(bytes4 selector, uint256 newDuration) external;
+function decreaseTimelock(bytes4 selector, uint256 newDuration) external;
+```
+
+<Warning>
+Use `increaseTimelock` carefully. Decreasing a timelock requires waiting through the current duration, which could lock in longer delays.
+</Warning>
+
+### Abdication
+
+Functions can be permanently disabled:
+
+```solidity
+function abdicate(bytes4 selector) external;
+```
+
+Once abdicated, a function cannot be called anymore, regardless of submitted data or timelock values. This provides ultimate commitment to certain configurations.
+
+### Revocation
+
+Sentinels can revoke pending changes for emergency risk management:
+
+```solidity
+function revoke(bytes memory data) external;
+```
+
+## Caps system
+
+The caps system manages risk by limiting allocations to positions with common risk factors.
+
+### Risk IDs
+
+Risk IDs are abstract identifiers for common risk factors:
+
+- Collateral type
+- Oracle provider  
+- Protocol/market
+- Any other risk dimension
+
+Adapters return relevant IDs when allocating/deallocating:
+
+```solidity
+function allocate(bytes memory data, uint256 assets, bytes4 selector, address sender)
+    external
+    returns (bytes32[] memory ids, int256 change);
+```
+
+### Absolute caps
+
+Hard limits on total allocation per ID:
+
+```solidity
+mapping(bytes32 id => uint256) public absoluteCap;
+```
+
+- Checked on every allocation
+- Measured in asset units
+- Can be decreased immediately by curator or sentinel
+- Increases require timelock (if configured)
+
+### Relative caps
+
+Proportional limits relative to total vault assets:
+
+```solidity
+mapping(bytes32 id => uint256) public relativeCap; // WAD units
+```
+
+- Checked on allocation, not withdrawal ("soft" caps)
+- Measured in WAD (1e18 = 100%)
+- Prevents flashloan manipulation using `firstTotalAssets`
+- Can be exceeded by interest/donations in adapters
+
+<Note>
+Relative caps use `firstTotalAssets` (assets after first accrual in transaction) rather than real-time assets. This prevents bypassing caps with flashloans but can generate false positives for large deposits through the liquidity adapter.
+</Note>
+
+### Cap management
+
+```solidity
+// Curator functions
+function increaseAbsoluteCap(bytes memory idData, uint256 newAbsoluteCap) external;
+function decreaseAbsoluteCap(bytes memory idData, uint256 newAbsoluteCap) external;
+function increaseRelativeCap(bytes memory idData, uint256 newRelativeCap) external;
+function decreaseRelativeCap(bytes memory idData, uint256 newRelativeCap) external;
+```
+
+### Allocation tracking
+
+The vault tracks current allocation per ID:
+
+```solidity
+mapping(bytes32 id => uint256) public allocation;
+```
+
+Allocations are updated during allocate/deallocate operations based on asset changes reported by adapters.
+
+## Liquidity management
+
+Vault V2 provides multiple mechanisms to ensure withdrawal liquidity:
+
+### Idle assets
+
+Assets held directly by the vault as ERC20 balance:
+
+- Used first for withdrawals
+- No yield generation
+- Allocators manage idle buffer size
+
+### Liquidity adapter
+
+Optional adapter for highly liquid markets:
+
+```solidity
+function setLiquidityAdapterAndData(
+    address newLiquidityAdapter,
+    bytes memory newLiquidityData
+) external;
+```
+
+**Deposit flow:**
+1. Assets deposited to vault
+2. Forwarded to liquidity adapter (if configured)
+3. Shares minted to depositor
+
+**Withdrawal flow:**
+1. Idle assets used first
+2. Liquidity adapter deallocated if needed
+3. Assets transferred to user
+
+<Tip>
+A typical liquidity adapter setup uses a very liquid Morpho Blue market to balance yield and liquidity.
+</Tip>
+
+### Force deallocate
+
+Permissionless function to extract liquidity from any adapter:
+
+```solidity
+function forceDeallocate(
+    address adapter,
+    bytes memory data,
+    uint256 assets,
+    address onBehalf
+) external returns (uint256 penaltyShares);
+```
+
+**How it works:**
+
+1. Anyone can call to deallocate assets from an adapter
+2. Assets moved to vault's idle balance
+3. Caller pays a penalty (up to 2%) in shares
+4. Penalty shares go to specified beneficiary
+
+**Use cases:**
+
+- Emergency liquidity extraction
+- In-kind redemptions
+- Manipulating relative caps (disincentivized by penalty)
+
+<Info>
+The penalty is configurable per adapter by the curator. Zero penalty means only gas cost prevents deallocations.
+</Info>
+
+### In-kind redemptions
+
+Users can exit with underlying market positions instead of assets:
+
+1. Flashloan liquidity
+2. Supply to adapter's market
+3. Use `forceDeallocate` to withdraw
+4. Repay flashloan
+5. Keep underlying position
+
+This works even when no underlying markets are liquid, providing ultimate exit guarantees.
+
+## Max rate
+
+Limits how fast the vault's share price can increase:
+
+```solidity
+function setMaxRate(uint256 newMaxRate) external; // Allocator only
+```
+
+**Benefits:**
+
+- Stabilizes distributed yield
+- Builds buffer to absorb losses
+- Prevents donation-based attacks
+- Reduces opportunistic depositor dilution
+
+**Measured in:** Rate per second (WAD units)
+
+Excess gains beyond `maxRate` accumulate in the vault, effectively creating a reserve buffer.
+
+<Note>
+Donations and `forceDeallocate` penalties increase share price, which can attract opportunistic depositors. The `maxRate` helps mitigate this.
+</Note>
+
+## Fees
+
+Vault V2 supports two types of fees:
+
+### Performance fee
+
+Cut on earned interest:
+
+```solidity
+function setPerformanceFee(uint256 newPerformanceFee) external; // Curator only
+function setPerformanceFeeRecipient(address newRecipient) external;
+```
+
+- **Unit**: WAD (1e18 = 100%)
+- **Maximum**: 50% (0.5e18)
+- **Charged on**: Interest accrual
+- **Paid in**: Vault shares minted to recipient
+
+### Management fee
+
+Annual fee on principal:
+
+```solidity
+function setManagementFee(uint256 newManagementFee) external; // Curator only  
+function setManagementFeeRecipient(address newRecipient) external;
+```
+
+- **Unit**: WAD (1e18 = 100% per year)
+- **Maximum**: 5% per year (0.05e18)
+- **Charged on**: Total assets over time
+- **Paid in**: Vault shares minted to recipient
+
+### Fee invariant
+
+```solidity
+// Both fees follow this invariant:
+fee != 0 => recipient != address(0)
+```
+
+<Warning>
+Fee changes are timelockable (if configured), giving users time to exit before new fees take effect.
+</Warning>
+
+## Gates
+
+Gates are external contracts that control access to vault operations:
+
+```solidity
+function setReceiveSharesGate(address newReceiveSharesGate) external;
+function setSendSharesGate(address newSendSharesGate) external;
+function setReceiveAssetsGate(address newReceiveAssetsGate) external;
+function setSendAssetsGate(address newSendAssetsGate) external;
+```
+
+### Gate types
+
+**Receive shares gate:**
+- Controls who can receive vault shares
+- Can lock users out of getting shares back from other contracts
+
+**Send shares gate:**
+- Controls who can send vault shares  
+- Can lock users out of exiting the vault
+
+**Receive assets gate:**
+- Controls who can withdraw assets from the vault
+- Vault itself (address(this)) is always allowed
+- Can lock users out of exiting
+
+**Send assets gate:**
+- Controls who can deposit assets to the vault
+- Not critical (cannot block user funds)
+- Useful for supply restrictions
+
+### Gate interface
+
+```solidity
+interface IReceiveSharesGate {
+    function canReceiveShares(address account) external view returns (bool);
+}
+
+interface ISendSharesGate {
+    function canSendShares(address account) external view returns (bool);
+}
+
+interface IReceiveAssetsGate {
+    function canReceiveAssets(address account) external view returns (bool);
+}
+
+interface ISendAssetsGate {
+    function canSendAssets(address account) external view returns (bool);
+}
+```
+
+<Warning>
+Gates must never revert or consume too much gas. Set to address(0) to disable a gate.
+</Warning>
+
+## Non-custodial guarantees
+
+Morpho Vault V2 provides strong non-custodial guarantees through multiple mechanisms:
+
+### 1. In-kind redemptions
+
+Users can always exit by converting shares to underlying positions:
+
+- Use `forceDeallocate` to extract liquidity
+- Combine with flashloans for in-kind exits
+- Works even when markets are illiquid
+- Only cost is gas + optional penalty (max 2%)
+
+### 2. Timelocks
+
+Critical changes require waiting periods:
+
+- Users can monitor pending changes
+- Time to exit before changes execute
+- Curator cannot directly hurt users without delay
+
+### 3. Immutability
+
+No upgrade mechanisms:
+
+- Predictable behavior forever
+- No governance risk
+- Code is law
+
+### 4. Role separation
+
+No single role can rug users:
+
+- Owner: Sets curator but cannot configure vault
+- Curator: Changes require timelocks
+- Allocators: Limited to caps and enabled adapters
+- Sentinels: Can only reduce risk
+
+<Tip>
+For maximum protection, ensure appropriate timelocks are configured before accepting deposits. Zero timelocks allow instant changes.
+</Tip>
+
+## Multicall
+
+Batch multiple operations in a single transaction:
+
+```solidity
+function multicall(bytes[] memory data) external;
+```
+
+Useful for:
+
+- Atomic configuration changes
+- Gas optimization
+- Coordinated allocations
+- Initial vault setup
+
+## ERC-4626 compliance
+
+Full standard compliance with some quirks:
+
+### Standard functions
+
+- `deposit()` / `mint()` - Add assets, receive shares
+- `withdraw()` / `redeem()` - Burn shares, receive assets  
+- `totalAssets()` - Total managed assets
+- `convertToShares()` / `convertToAssets()` - Conversion functions
+- `previewDeposit()` / `previewMint()` - Preview deposits
+- `previewWithdraw()` / `previewRedeem()` - Preview withdrawals
+
+### Non-conventional behavior
+
+```solidity
+function maxDeposit(address) external pure returns (uint256) {
+    return 0; // Always returns 0
+}
+
+function maxMint(address) external pure returns (uint256) {
+    return 0; // Always returns 0  
+}
+
+function maxWithdraw(address) external pure returns (uint256) {
+    return 0; // Always returns 0
+}
+
+function maxRedeem(address) external pure returns (uint256) {
+    return 0; // Always returns 0
+}
+```
+
+<Warning>
+All max functions return zero. Do not rely on these for determining deposit/withdrawal limits.
+</Warning>
+
+### ERC-2612 permit
+
+Supports gasless approvals:
+
+```solidity
+function permit(
+    address owner,
+    address spender,
+    uint256 value,
+    uint256 deadline,
+    uint8 v,
+    bytes32 r,
+    bytes32 s
+) external;
+```
+
+## View functions
+
+Access vault state without transactions:
+
+### Interest accrual preview
+
+```solidity
+function accrueInterestView()
+    external
+    view
+    returns (
+        uint256 newTotalAssets,
+        uint256 performanceFeeShares,
+        uint256 managementFeeShares
+    );
+```
+
+Calculates updated total assets and fee shares without state changes.
+
+### Total assets
+
+```solidity
+function totalAssets() external view returns (uint256);
+```
+
+Returns current total managed assets including:
+
+- Idle vault balance
+- All adapter positions (via `realAssets()`)
+- Unapplied interest/losses
+
+<Note>
+`totalSupply` is not updated to include unminted fee shares. Call `accrueInterestView()` to compute the updated total supply.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Adapters" href="/concepts/adapters">
+    Learn about connecting to underlying markets
+  </Card>
+  <Card title="Roles" href="/concepts/roles">
+    Understand the role-based access control system
+  </Card>
+</CardGroup>

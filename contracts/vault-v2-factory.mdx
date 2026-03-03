@@ -1,0 +1,149 @@
+---
+title: VaultV2Factory
+description: Factory contract for deploying new Morpho VaultV2 instances with deterministic addresses
+---
+
+# VaultV2Factory
+
+The VaultV2Factory contract is a factory for deploying new VaultV2 instances using the CREATE2 opcode, enabling deterministic vault addresses.
+
+## Overview
+
+VaultV2Factory provides a simple interface for creating VaultV2 vaults with predictable addresses based on the owner, asset, and salt parameters. It maintains a registry of all deployed vaults and their deployment parameters.
+
+## State variables
+
+<ParamField path="isVaultV2" type="mapping(address => bool)">
+  Mapping that tracks whether an address is a VaultV2 created by this factory
+</ParamField>
+
+<ParamField path="vaultV2" type="mapping(address => mapping(address => mapping(bytes32 => address)))">
+  Three-level mapping that stores vault addresses by owner, asset, and salt. Allows lookup of vault addresses given deployment parameters.
+</ParamField>
+
+## View functions
+
+### isVaultV2
+
+```solidity
+function isVaultV2(address account) external view returns (bool)
+```
+
+Checks if an address is a VaultV2 deployed by this factory.
+
+<ParamField path="account" type="address">
+  The address to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the address is a VaultV2 created by this factory
+</ResponseField>
+
+### vaultV2
+
+```solidity
+function vaultV2(address owner, address asset, bytes32 salt) external view returns (address)
+```
+
+Retrieves the vault address for given deployment parameters.
+
+<ParamField path="owner" type="address">
+  The owner address used in vault creation
+</ParamField>
+
+<ParamField path="asset" type="address">
+  The asset address used in vault creation
+</ParamField>
+
+<ParamField path="salt" type="bytes32">
+  The salt used in vault creation
+</ParamField>
+
+<ResponseField name="" type="address">
+  The address of the deployed vault (address(0) if not deployed)
+</ResponseField>
+
+## Public functions
+
+### createVaultV2
+
+```solidity
+function createVaultV2(address owner, address asset, bytes32 salt) external returns (address)
+```
+
+Deploys a new VaultV2 instance using CREATE2 for deterministic addressing.
+
+<ParamField path="owner" type="address">
+  The initial owner of the vault
+</ParamField>
+
+<ParamField path="asset" type="address">
+  The underlying ERC-20 asset address for the vault
+</ParamField>
+
+<ParamField path="salt" type="bytes32">
+  A unique salt for CREATE2 deployment (allows multiple vaults with same owner/asset)
+</ParamField>
+
+<ResponseField name="" type="address">
+  The address of the newly deployed VaultV2
+</ResponseField>
+
+The vault address can be pre-computed using the standard CREATE2 formula:
+
+```
+address = keccak256(0xff ++ factoryAddress ++ salt ++ keccak256(initCode))[12:]
+```
+
+Where `initCode` is the concatenation of the VaultV2 creation code and the ABI-encoded constructor arguments `(owner, asset)`.
+
+## Events
+
+### CreateVaultV2
+
+```solidity
+event CreateVaultV2(address indexed owner, address indexed asset, bytes32 salt, address indexed newVaultV2)
+```
+
+Emitted when a new VaultV2 is created.
+
+<ParamField path="owner" type="address" indexed>
+  The owner of the newly created vault
+</ParamField>
+
+<ParamField path="asset" type="address" indexed>
+  The underlying asset of the vault
+</ParamField>
+
+<ParamField path="salt" type="bytes32">
+  The salt used for CREATE2 deployment
+</ParamField>
+
+<ParamField path="newVaultV2" type="address" indexed>
+  The address of the newly deployed VaultV2
+</ParamField>
+
+## Usage example
+
+```solidity
+// Deploy a new vault
+address owner = 0x1234...;
+address asset = 0x5678...; // e.g., USDC
+bytes32 salt = keccak256("my-vault-v1");
+
+address newVault = factory.createVaultV2(owner, asset, salt);
+
+// Later, retrieve the vault address
+address retrieved = factory.vaultV2(owner, asset, salt);
+assert(retrieved == newVault);
+
+// Check if an address is a VaultV2 from this factory
+bool isVault = factory.isVaultV2(newVault); // returns true
+```
+
+## Notes
+
+- The same combination of `owner`, `asset`, and `salt` will always produce the same vault address
+- Attempting to create a vault with parameters that have already been used will revert (CREATE2 requirement)
+- The factory does not have any special permissions over created vaults - the specified owner has full control
+- Each vault is an independent contract with its own state and configuration

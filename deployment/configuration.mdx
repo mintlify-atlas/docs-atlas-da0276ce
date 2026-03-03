@@ -1,0 +1,569 @@
+---
+title: Vault configuration
+description: Configure roles, fees, adapters, caps, and other parameters for your Morpho Vault V2
+---
+
+After deploying a vault, configure it according to your strategy by setting up roles, adapters, fees, and risk parameters. This guide covers all configuration options available for Morpho Vault V2.
+
+## Configuration overview
+
+Vault V2 uses a role-based permission system with timelock protection:
+
+- **Owner**: Sets curator, sentinels, and vault metadata (no timelock)
+- **Curator**: Manages adapters, fees, caps, and gates (with timelock)
+- **Allocators**: Allocate capital to adapters and set liquidity parameters (no timelock)
+- **Sentinels**: Emergency role to decrease caps and revoke pending changes (no timelock)
+
+<Note>
+At deployment, all timelocks are zero to facilitate quick initial setup. After configuration, increase timelocks to protect the vault.
+</Note>
+
+## Role management
+
+### Setting the curator
+
+The curator manages vault configuration through timelocked operations:
+
+```solidity
+vault.setCurator(curatorAddress);
+```
+
+**Owner-only function** - No timelock required.
+
+The curator can:
+- Add/remove adapters
+- Set fees and fee recipients
+- Configure caps (absolute and relative)
+- Set gates for access control
+- Manage timelocks
+- Assign allocators
+
+### Configuring allocators
+
+Allocators manage capital allocation across adapters:
+
+```solidity
+// Curator submits the change
+bytes memory data = abi.encodeWithSelector(
+    vault.setIsAllocator.selector,
+    allocatorAddress,
+    true // or false to remove
+);
+vault.submit(data);
+
+// After timelock expires, execute
+(bool success,) = address(vault).call(data);
+require(success, "Execution failed");
+```
+
+**Curator function** - Requires timelock.
+
+Allocators can:
+- Move funds between adapters using `allocate()` and `deallocate()`
+- Set the liquidity adapter and data
+- Configure the maximum interest rate (`maxRate`)
+
+### Setting sentinels
+
+Sentinels can respond to emergencies by decreasing caps:
+
+```solidity
+vault.setIsSentinel(sentinelAddress, true);
+```
+
+**Owner-only function** - No timelock required.
+
+Sentinels can:
+- Decrease absolute and relative caps immediately
+- Revoke pending timelocked operations
+- Deallocate funds from adapters
+
+<Warning>
+If `setIsAllocator` is timelocked, removing an allocator will take time. Consider this when designing your security model.
+</Warning>
+
+## Adapter management
+
+### Adding adapters
+
+Adapters connect the vault to yield-generating protocols:
+
+```solidity
+bytes memory data = abi.encodeWithSelector(
+    vault.addAdapter.selector,
+    adapterAddress
+);
+vault.submit(data);
+// Wait for timelock, then execute
+```
+
+**Curator function** - Requires timelock.
+
+<Note>
+If an adapter registry is configured, the adapter must be registered before it can be added.
+</Note>
+
+### Removing adapters
+
+```solidity
+bytes memory data = abi.encodeWithSelector(
+    vault.removeAdapter.selector,
+    adapterAddress
+);
+vault.submit(data);
+// Wait for timelock, then execute
+```
+
+**Curator function** - Requires timelock.
+
+<Warning>
+Remove adapters only when they have no assets. To prevent allocations during removal, set an exclusive cap for the adapter to zero.
+</Warning>
+
+### Setting adapter registry
+
+Restrict which adapters can be added:
+
+```solidity
+bytes memory data = abi.encodeWithSelector(
+    vault.setAdapterRegistry.selector,
+    registryAddress // or address(0) to allow any adapter
+);
+vault.submit(data);
+```
+
+**Curator function** - Requires timelock.
+
+The registry retroactively checks already-added adapters when set.
+
+## Fee configuration
+
+### Setting performance fee
+
+Performance fee is charged on interest earned:
+
+```solidity
+// 10% performance fee (in WAD: 0.1e18)
+uint256 performanceFee = 0.1e18;
+
+bytes memory data = abi.encodeWithSelector(
+    vault.setPerformanceFee.selector,
+    performanceFee
+);
+vault.submit(data);
+```
+
+**Curator function** - Requires timelock.
+
+**Maximum**: Defined by `MAX_PERFORMANCE_FEE` constant.
+
+### Setting management fee
+
+Management fee is charged annually on total assets:
+
+```solidity
+// 2% annual management fee (in WAD per second: ~0.63e9)
+uint256 annualRate = 0.02e18;
+uint256 managementFee = annualRate / 365 days;
+
+bytes memory data = abi.encodeWithSelector(
+    vault.setManagementFee.selector,
+    managementFee
+);
+vault.submit(data);
+```
+
+**Curator function** - Requires timelock.
+
+**Maximum**: Defined by `MAX_MANAGEMENT_FEE` constant.
+
+### Setting fee recipients
+
+Fee recipients receive minted shares as fees:
+
+```solidity
+// Performance fee recipient
+bytes memory data1 = abi.encodeWithSelector(
+    vault.setPerformanceFeeRecipient.selector,
+    recipientAddress
+);
+vault.submit(data1);
+
+// Management fee recipient
+bytes memory data2 = abi.encodeWithSelector(
+    vault.setManagementFeeRecipient.selector,
+    recipientAddress
+);
+vault.submit(data2);
+```
+
+**Curator function** - Requires timelock.
+
+<Note>
+The invariant `fee != 0 => recipient != address(0)` must hold. Set the fee to zero before removing a recipient, or vice versa.
+</Note>
+
+## Cap management
+
+Caps limit exposure to specific markets or categories identified by an `id` (bytes32).
+
+### Understanding cap IDs
+
+Adapters return `ids` during allocate/deallocate operations. These ids can:
+- Identify specific markets
+- Group related markets (e.g., all Compound markets)
+- Be reused across adapters to cap categories
+
+### Setting absolute caps
+
+Absolute caps limit the total amount allocated to an id:
+
+```solidity
+bytes memory idData = abi.encode("market-1");
+uint256 cap = 1_000_000e6; // 1M USDC
+
+// Increase cap (timelocked)
+bytes memory data = abi.encodeWithSelector(
+    vault.increaseAbsoluteCap.selector,
+    idData,
+    cap
+);
+vault.submit(data);
+
+// Decrease cap (no timelock - curator or sentinel)
+vault.decreaseAbsoluteCap(idData, cap);
+```
+
+**Increase**: Curator function with timelock  
+**Decrease**: Curator or sentinel without timelock
+
+<Warning>
+Setting a cap to zero prevents new allocations but doesn't force deallocations. Existing positions remain.
+</Warning>
+
+### Setting relative caps
+
+Relative caps limit allocations as a fraction of total assets (in WAD):
+
+```solidity
+bytes memory idData = abi.encode("high-risk-markets");
+uint256 cap = 0.3e18; // 30% of total assets
+
+// Increase cap (timelocked)
+bytes memory data = abi.encodeWithSelector(
+    vault.increaseRelativeCap.selector,
+    idData,
+    cap
+);
+vault.submit(data);
+
+// Decrease cap (no timelock - curator or sentinel)
+vault.decreaseRelativeCap(idData, cap);
+```
+
+**Increase**: Curator function with timelock  
+**Decrease**: Curator or sentinel without timelock  
+**Maximum**: 1 WAD (100%)
+
+Relative caps are checked against `firstTotalAssets` (total assets at first interaction in a transaction) to prevent flashloan bypass.
+
+### Force deallocate penalty
+
+Set a penalty for users who force deallocate from an adapter:
+
+```solidity
+uint256 penalty = 0.01e18; // 1% penalty
+
+bytes memory data = abi.encodeWithSelector(
+    vault.setForceDeallocatePenalty.selector,
+    adapterAddress,
+    penalty
+);
+vault.submit(data);
+```
+
+**Curator function** - Requires timelock.
+
+**Maximum**: Defined by `MAX_FORCE_DEALLOCATE_PENALTY` constant.
+
+## Liquidity adapter configuration
+
+The liquidity adapter handles deposits and withdrawals automatically:
+
+```solidity
+address liquidityAdapter = 0x...; // Adapter for liquid markets
+bytes memory liquidityData = abi.encode(...); // Adapter-specific data
+
+vault.setLiquidityAdapterAndData(liquidityAdapter, liquidityData);
+```
+
+**Allocator function** - No timelock.
+
+- On `deposit`/`mint`: Assets are allocated to the liquidity adapter
+- On `withdraw`/`redeem`: If idle assets are insufficient, funds are deallocated from the liquidity adapter
+
+<Warning>
+If caps for the liquidity adapter are reached, deposits may revert. Ensure sufficient capacity or use `liquidityAdapter = address(0)` to keep deposits idle.
+</Warning>
+
+## Interest rate configuration
+
+Set the maximum interest rate to prevent donation-based attacks:
+
+```solidity
+// 10% APY max rate (in WAD per second: ~3.17e9)
+uint256 maxApy = 0.10e18;
+uint256 maxRate = maxApy / 365 days;
+
+vault.setMaxRate(maxRate);
+```
+
+**Allocator function** - No timelock.
+
+**Maximum**: Defined by `MAX_MAX_RATE` constant.
+
+Interest accrual is capped at this rate to prevent share price manipulation through large donations.
+
+## Gate configuration
+
+Gates restrict who can interact with the vault:
+
+### Receive shares gate
+
+```solidity
+bytes memory data = abi.encodeWithSelector(
+    vault.setReceiveSharesGate.selector,
+    gateAddress // or address(0) to disable
+);
+vault.submit(data);
+```
+
+Gates receiving shares (from deposits or transfers).
+
+### Send shares gate
+
+```solidity
+bytes memory data = abi.encodeWithSelector(
+    vault.setSendSharesGate.selector,
+    gateAddress
+);
+vault.submit(data);
+```
+
+Gates sending shares (withdrawals and transfers).
+
+<Warning>
+Send shares gate can lock users out of exiting the vault. Use with caution.
+</Warning>
+
+### Receive assets gate
+
+```solidity
+bytes memory data = abi.encodeWithSelector(
+    vault.setReceiveAssetsGate.selector,
+    gateAddress
+);
+vault.submit(data);
+```
+
+Gates withdrawing assets from the vault. The vault itself (`address(this)`) is always allowed to receive assets.
+
+### Send assets gate
+
+```solidity
+bytes memory data = abi.encodeWithSelector(
+    vault.setSendAssetsGate.selector,
+    gateAddress
+);
+vault.submit(data);
+```
+
+Gates depositing assets to the vault. This is not critical for user protection.
+
+**All gate functions**: Curator-only with timelock.
+
+<Note>
+Gates must never revert and should consume minimal gas. Set to `address(0)` to disable a gate.
+</Note>
+
+## Timelock management
+
+### Increasing timelocks
+
+Increase the timelock duration for a function:
+
+```solidity
+bytes4 selector = vault.addAdapter.selector;
+uint256 newDuration = 7 days;
+
+bytes memory data = abi.encodeWithSelector(
+    vault.increaseTimelock.selector,
+    selector,
+    newDuration
+);
+vault.submit(data);
+// Execute after current timelock expires
+```
+
+**Curator function** - Requires timelock (of the target function).
+
+### Decreasing timelocks
+
+```solidity
+bytes4 selector = vault.addAdapter.selector;
+uint256 newDuration = 1 days;
+
+bytes memory data = abi.encodeWithSelector(
+    vault.decreaseTimelock.selector,
+    selector,
+    newDuration
+);
+vault.submit(data);
+// Execute after current timelock expires
+```
+
+**Curator function** - Requires timelock (of the target function).
+
+<Note>
+The timelock for `decreaseTimelock` itself is automatically set to match the function being modified and cannot be changed.
+</Note>
+
+### Abdicating functions
+
+Permanently disable a curator function:
+
+```solidity
+bytes4 selector = vault.addAdapter.selector;
+
+bytes memory data = abi.encodeWithSelector(
+    vault.abdicate.selector,
+    selector
+);
+vault.submit(data);
+// Execute after timelock
+```
+
+**Curator function** - Requires timelock.
+
+<Warning>
+Abdication is permanent and cannot be reversed. Use with extreme caution.
+</Warning>
+
+## Timelock workflow
+
+<Steps>
+  <Step title="Submit the change">
+    Curator calls `submit()` with encoded function call:
+
+    ```solidity
+    bytes memory data = abi.encodeWithSelector(
+        vault.addAdapter.selector,
+        adapterAddress
+    );
+    vault.submit(data);
+    ```
+
+    The change is recorded with execution time = `block.timestamp + timelock[selector]`.
+  </Step>
+
+  <Step title="Wait for timelock">
+    Wait until `block.timestamp >= executableAt[data]`.
+
+    During this period, sentinels or the curator can revoke the change:
+
+    ```solidity
+    vault.revoke(data);
+    ```
+  </Step>
+
+  <Step title="Execute the change">
+    After the timelock expires, anyone can execute:
+
+    ```solidity
+    (bool success, bytes memory returnData) = address(vault).call(data);
+    require(success, "Execution failed");
+    ```
+
+    The function validates that:
+    - `executableAt[data] != 0` (was submitted)
+    - `block.timestamp >= executableAt[data]` (timelock expired)
+    - `!abdicated[selector]` (function not abdicated)
+  </Step>
+</Steps>
+
+## Initial configuration example
+
+```solidity
+// 1. Deploy vault
+address vault = factory.createVaultV2(owner, asset, salt);
+
+// 2. Set metadata (owner)
+IVaultV2(vault).setName("Morpho USDC Vault");
+IVaultV2(vault).setSymbol("mUSDC");
+
+// 3. Set curator (owner)
+IVaultV2(vault).setCurator(curator);
+
+// 4. Set allocator (curator, initially no timelock)
+bytes memory data = abi.encodeWithSelector(
+    IVaultV2.setIsAllocator.selector, allocator, true
+);
+IVaultV2(vault).submit(data);
+(bool success,) = address(vault).call(data);
+require(success);
+
+// 5. Add adapters (curator, initially no timelock)
+data = abi.encodeWithSelector(
+    IVaultV2.addAdapter.selector, morphoAdapter
+);
+IVaultV2(vault).submit(data);
+(success,) = address(vault).call(data);
+require(success);
+
+// 6. Set caps (curator, initially no timelock)
+bytes memory idData = abi.encode("morpho-usdc-market-1");
+data = abi.encodeWithSelector(
+    IVaultV2.increaseAbsoluteCap.selector, idData, 10_000_000e6
+);
+IVaultV2(vault).submit(data);
+(success,) = address(vault).call(data);
+require(success);
+
+// 7. Set fees (curator, initially no timelock)
+data = abi.encodeWithSelector(
+    IVaultV2.setPerformanceFeeRecipient.selector, feeRecipient
+);
+IVaultV2(vault).submit(data);
+(success,) = address(vault).call(data);
+require(success);
+
+data = abi.encodeWithSelector(
+    IVaultV2.setPerformanceFee.selector, 0.1e18 // 10%
+);
+IVaultV2(vault).submit(data);
+(success,) = address(vault).call(data);
+require(success);
+
+// 8. Increase timelocks for protection (curator, initially no timelock)
+data = abi.encodeWithSelector(
+    IVaultV2.increaseTimelock.selector,
+    IVaultV2.addAdapter.selector,
+    7 days
+);
+IVaultV2(vault).submit(data);
+(success,) = address(vault).call(data);
+require(success);
+
+// Vault is now configured and protected
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Vault creation" icon="rocket" href="/deployment/vault-creation">
+    Learn how to deploy a new vault
+  </Card>
+  <Card title="Adapters" icon="plug" href="/concepts/adapters">
+    Understand how adapters work
+  </Card>
+</CardGroup>

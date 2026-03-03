@@ -1,0 +1,594 @@
+---
+title: MorphoMarketV1AdapterV2
+description: Adapter contract for integrating Morpho Blue markets with Morpho Vault V2
+---
+
+## Overview
+
+The `MorphoMarketV1AdapterV2` contract enables Morpho Vault V2 to allocate assets to Morpho Blue markets (also known as Morpho Market V1). This adapter implements a timelock system for critical operations and supports multiple markets with the Adaptive Curve IRM.
+
+<Note>
+Morpho Market V1 is also known as Morpho Blue. This adapter must only be used with markets that:
+- Are protected against inflation attacks with an initial supply
+- Use the Adaptive Curve IRM
+- Have properly configured timelocks before being added to the vault
+</Note>
+
+<Warning>
+- Donated shares and burnt shares are lost forever
+- Rounding error losses on supply/withdraw are realizable
+- If `expectedSupplyAssets` reverts for any market, the vault cannot accrue interest
+- Too many markets may cause expensive interactions or DOS due to gas limits
+</Warning>
+
+## Contract details
+
+**License:** GPL-2.0-or-later  
+**Solidity version:** 0.8.28
+
+## State variables
+
+### Immutable variables
+
+#### factory
+
+```solidity
+address public immutable factory
+```
+
+The address of the factory contract that deployed this adapter.
+
+#### parentVault
+
+```solidity
+address public immutable parentVault
+```
+
+The address of the parent Morpho Vault V2 that uses this adapter.
+
+#### asset
+
+```solidity
+address public immutable asset
+```
+
+The underlying asset token address.
+
+#### morpho
+
+```solidity
+address public immutable morpho
+```
+
+The address of the Morpho Blue protocol contract.
+
+#### adapterId
+
+```solidity
+bytes32 public immutable adapterId
+```
+
+Unique identifier for this adapter instance, computed as `keccak256(abi.encode("this", address(this)))`.
+
+#### adaptiveCurveIrm
+
+```solidity
+address public immutable adaptiveCurveIrm
+```
+
+The address of the Adaptive Curve IRM. Only markets using this IRM can be used with this adapter.
+
+### Storage variables
+
+#### timelock
+
+```solidity
+mapping(bytes4 selector => uint256) public timelock
+```
+
+Maps function selectors to their required timelock durations in seconds.
+
+#### abdicated
+
+```solidity
+mapping(bytes4 selector => bool) public abdicated
+```
+
+Maps function selectors to whether their timelock has been permanently disabled.
+
+#### executableAt
+
+```solidity
+mapping(bytes data => uint256) public executableAt
+```
+
+Maps pending operation data to the timestamp when it becomes executable.
+
+#### skimRecipient
+
+```solidity
+address public skimRecipient
+```
+
+The address that receives skimmed tokens (rewards).
+
+#### marketIds
+
+```solidity
+bytes32[] public marketIds
+```
+
+Array of market IDs that currently have non-zero allocations.
+
+<Note>
+Markets are removed from `marketIds` when allocation reaches zero, but the adapter may still hold shares.
+</Note>
+
+#### supplyShares
+
+```solidity
+mapping(bytes32 marketId => uint256) public supplyShares
+```
+
+Maps market IDs to the adapter's supply shares in each market.
+
+## Constructor
+
+```solidity
+constructor(address _parentVault, address _morpho, address _adaptiveCurveIrm)
+```
+
+Initializes the adapter with the parent vault and Morpho Blue protocol.
+
+<ParamField path="_parentVault" type="address">
+  The address of the parent Morpho Vault V2
+</ParamField>
+
+<ParamField path="_morpho" type="address">
+  The address of the Morpho Blue protocol
+</ParamField>
+
+<ParamField path="_adaptiveCurveIrm" type="address">
+  The address of the Adaptive Curve IRM
+</ParamField>
+
+## View functions
+
+### marketIdsLength
+
+```solidity
+function marketIdsLength() external view returns (uint256)
+```
+
+Returns the number of markets with non-zero allocations.
+
+<ResponseField name="length" type="uint256">
+  The length of the marketIds array
+</ResponseField>
+
+### expectedSupplyAssets
+
+```solidity
+function expectedSupplyAssets(bytes32 marketId) public view returns (uint256)
+```
+
+Returns the expected supply assets for a market based on internal shares accounting.
+
+<ParamField path="marketId" type="bytes32">
+  The ID of the Morpho Blue market
+</ParamField>
+
+<ResponseField name="assets" type="uint256">
+  The expected supply assets in the market
+</ResponseField>
+
+### allocation
+
+```solidity
+function allocation(MarketParams memory marketParams) public view returns (uint256)
+```
+
+Returns the vault's allocation for a specific market.
+
+<ParamField path="marketParams" type="MarketParams">
+  The market parameters struct
+</ParamField>
+
+<ResponseField name="allocation" type="uint256">
+  The current allocation amount
+</ResponseField>
+
+### ids
+
+```solidity
+function ids(MarketParams memory marketParams) public view returns (bytes32[] memory)
+```
+
+Returns the allocation IDs for a market.
+
+<ParamField path="marketParams" type="MarketParams">
+  The market parameters struct
+</ParamField>
+
+<ResponseField name="ids" type="bytes32[]">
+  Array containing:
+  - `ids[0]`: adapter ID
+  - `ids[1]`: collateral token ID
+  - `ids[2]`: market-specific ID
+</ResponseField>
+
+### realAssets
+
+```solidity
+function realAssets() external view returns (uint256)
+```
+
+Returns the total real assets held across all markets.
+
+<ResponseField name="assets" type="uint256">
+  The sum of expected supply assets across all markets
+</ResponseField>
+
+## Timelock functions
+
+### submit
+
+```solidity
+function submit(bytes calldata data) external
+```
+
+Submits an operation for timelock. Only callable by the vault curator.
+
+<ParamField path="data" type="bytes">
+  The encoded function call data to be timelocked
+</ParamField>
+
+<Warning>
+Will revert if the timelock value would overflow when added to the current block timestamp.
+</Warning>
+
+### revoke
+
+```solidity
+function revoke(bytes calldata data) external
+```
+
+Revokes a pending timelocked operation. Callable by curator or sentinels.
+
+<ParamField path="data" type="bytes">
+  The encoded function call data to revoke
+</ParamField>
+
+### increaseTimelock
+
+```solidity
+function increaseTimelock(bytes4 selector, uint256 newDuration) external
+```
+
+Increases the timelock duration for a function selector. This function itself requires a timelock.
+
+<ParamField path="selector" type="bytes4">
+  The function selector to modify
+</ParamField>
+
+<ParamField path="newDuration" type="uint256">
+  The new timelock duration in seconds (must be greater than current)
+</ParamField>
+
+<Warning>
+This function requires great caution as it can irreversibly disable submit for a selector. Existing pending operations can still execute at their initial `executableAt` time.
+</Warning>
+
+### decreaseTimelock
+
+```solidity
+function decreaseTimelock(bytes4 selector, uint256 newDuration) external
+```
+
+Decreases the timelock duration for a function selector. This function itself requires a timelock.
+
+<ParamField path="selector" type="bytes4">
+  The function selector to modify
+</ParamField>
+
+<ParamField path="newDuration" type="uint256">
+  The new timelock duration in seconds (must be less than current)
+</ParamField>
+
+### abdicate
+
+```solidity
+function abdicate(bytes4 selector) external
+```
+
+Permanently disables timelock for a function selector. This function itself requires a timelock.
+
+<ParamField path="selector" type="bytes4">
+  The function selector to abdicate
+</ParamField>
+
+<Warning>
+This irreversibly disables submit for the selector. Existing pending operations cannot be executed after abdication.
+</Warning>
+
+## Curator functions
+
+### setSkimRecipient
+
+```solidity
+function setSkimRecipient(address newSkimRecipient) external
+```
+
+Sets the recipient address for skimmed tokens. Requires timelock.
+
+<ParamField path="newSkimRecipient" type="address">
+  The new skim recipient address
+</ParamField>
+
+### burnShares
+
+```solidity
+function burnShares(bytes32 marketId) external
+```
+
+Burns all supply shares for a specific market. Requires timelock.
+
+<ParamField path="marketId" type="bytes32">
+  The market ID to burn shares for
+</ParamField>
+
+<Note>
+After burning shares, deallocate 0 from the vault to update the allocation. It's recommended to set market caps to zero before burning to avoid further losses.
+</Note>
+
+## Other functions
+
+### skim
+
+```solidity
+function skim(address token) external
+```
+
+Skims the adapter's balance of a token and sends it to the skim recipient. Only callable by skim recipient.
+
+<ParamField path="token" type="address">
+  The token address to skim
+</ParamField>
+
+### allocate
+
+```solidity
+function allocate(
+    bytes memory data,
+    uint256 assets,
+    bytes4,
+    address
+) external returns (bytes32[] memory, int256)
+```
+
+Allocates assets to a Morpho Blue market. Only callable by parent vault.
+
+<ParamField path="data" type="bytes">
+  ABI-encoded MarketParams struct
+</ParamField>
+
+<ParamField path="assets" type="uint256">
+  Amount of assets to allocate
+</ParamField>
+
+<ResponseField name="ids" type="bytes32[]">
+  The allocation IDs
+</ResponseField>
+
+<ResponseField name="change" type="int256">
+  The change in allocation amount
+</ResponseField>
+
+### deallocate
+
+```solidity
+function deallocate(
+    bytes memory data,
+    uint256 assets,
+    bytes4,
+    address
+) external returns (bytes32[] memory, int256)
+```
+
+Deallocates assets from a Morpho Blue market. Only callable by parent vault.
+
+<ParamField path="data" type="bytes">
+  ABI-encoded MarketParams struct
+</ParamField>
+
+<ParamField path="assets" type="uint256">
+  Amount of assets to deallocate
+</ParamField>
+
+<ResponseField name="ids" type="bytes32[]">
+  The allocation IDs
+</ResponseField>
+
+<ResponseField name="change" type="int256">
+  The change in allocation amount
+</ResponseField>
+
+## Events
+
+### Submit
+
+```solidity
+event Submit(bytes4 indexed selector, bytes data, uint256 executableAt)
+```
+
+Emitted when an operation is submitted for timelock.
+
+### Revoke
+
+```solidity
+event Revoke(address indexed sender, bytes4 indexed selector, bytes data)
+```
+
+Emitted when a pending operation is revoked.
+
+### Accept
+
+```solidity
+event Accept(bytes4 indexed selector, bytes data)
+```
+
+Emitted when a timelocked operation is executed.
+
+### Abdicate
+
+```solidity
+event Abdicate(bytes4 indexed selector)
+```
+
+Emitted when timelock for a selector is permanently disabled.
+
+### IncreaseTimelock
+
+```solidity
+event IncreaseTimelock(bytes4 indexed selector, uint256 newDuration)
+```
+
+Emitted when a timelock duration is increased.
+
+### DecreaseTimelock
+
+```solidity
+event DecreaseTimelock(bytes4 indexed selector, uint256 newDuration)
+```
+
+Emitted when a timelock duration is decreased.
+
+### SetSkimRecipient
+
+```solidity
+event SetSkimRecipient(address indexed newSkimRecipient)
+```
+
+Emitted when the skim recipient is updated.
+
+### Skim
+
+```solidity
+event Skim(address indexed token, uint256 assets)
+```
+
+Emitted when tokens are skimmed from the adapter.
+
+### BurnShares
+
+```solidity
+event BurnShares(bytes32 indexed marketId, uint256 supplyShares)
+```
+
+Emitted when supply shares are burned for a market.
+
+### Allocate
+
+```solidity
+event Allocate(bytes32 indexed marketId, uint256 newAllocation, uint256 mintedShares)
+```
+
+Emitted when assets are allocated to a market.
+
+### Deallocate
+
+```solidity
+event Deallocate(bytes32 indexed marketId, uint256 newAllocation, uint256 burnedShares)
+```
+
+Emitted when assets are deallocated from a market.
+
+## Errors
+
+### Abdicated
+
+```solidity
+error Abdicated()
+```
+
+Thrown when attempting to execute a function whose timelock has been abdicated.
+
+### AutomaticallyTimelocked
+
+```solidity
+error AutomaticallyTimelocked()
+```
+
+Thrown when attempting to modify the timelock for `decreaseTimelock` itself.
+
+### DataAlreadyPending
+
+```solidity
+error DataAlreadyPending()
+```
+
+Thrown when submitting data that is already pending execution.
+
+### DataNotTimelocked
+
+```solidity
+error DataNotTimelocked()
+```
+
+Thrown when attempting to execute or revoke data that has not been submitted.
+
+### IrmMismatch
+
+```solidity
+error IrmMismatch()
+```
+
+Thrown when a market does not use the required Adaptive Curve IRM.
+
+### LoanAssetMismatch
+
+```solidity
+error LoanAssetMismatch()
+```
+
+Thrown when a market's loan token does not match the adapter's asset.
+
+### SharePriceAboveOne
+
+```solidity
+error SharePriceAboveOne()
+```
+
+Thrown when minted shares are less than supplied assets (share price > 1).
+
+### TimelockNotDecreasing
+
+```solidity
+error TimelockNotDecreasing()
+```
+
+Thrown when the new timelock duration is not less than the current duration.
+
+### TimelockNotExpired
+
+```solidity
+error TimelockNotExpired()
+```
+
+Thrown when attempting to execute an operation before its timelock has expired.
+
+### TimelockNotIncreasing
+
+```solidity
+error TimelockNotIncreasing()
+```
+
+Thrown when the new timelock duration is not greater than the current duration.
+
+### Unauthorized
+
+```solidity
+error Unauthorized()
+```
+
+Thrown when the caller is not authorized to perform the operation.

@@ -1,0 +1,158 @@
+---
+title: Non-custodial guarantees
+description: Learn how Morpho Vault V2 ensures users maintain control over their assets through in-kind redemptions and timelocks
+---
+
+Morpho Vault V2 provides strong non-custodial guarantees that ensure users can always withdraw their assets before critical configuration changes take effect. These guarantees stem from two key mechanisms working in tandem.
+
+## Core mechanisms
+
+Non-custodial guarantees in Vault V2 are built on two fundamental features:
+
+1. **In-kind redemptions** - Users can exit the vault even when underlying markets are illiquid
+2. **Curator timelocks** - Configuration changes require time delays, allowing users to exit before changes take effect
+
+<Note>
+When the right timelocks are properly configured (not zero), users are guaranteed the ability to withdraw their assets before any critical configuration change becomes effective.
+</Note>
+
+## In-kind redemptions with `forceDeallocate`
+
+The `forceDeallocate` function enables users to perform in-kind redemptions, converting their vault position into underlying market positions without requiring liquidity from the vault.
+
+### How it works
+
+1. Anyone can call `forceDeallocate` to move assets from an adapter to the vault's idle assets
+2. Users can combine this with flashloans to exit the vault:
+   - Flashloan liquidity
+   - Supply it to an adapter's market
+   - Withdraw via `forceDeallocate`
+   - Repay the flashloan
+
+### Penalty mechanism
+
+```solidity
+// VaultV2.sol:825-843
+function forceDeallocate(address adapter, bytes memory data, uint256 assets, address onBehalf)
+    external
+    returns (uint256)
+{
+    bytes32[] memory ids = deallocateInternal(adapter, data, assets);
+    uint256 penaltyAssets = assets.mulDivUp(forceDeallocatePenalty[adapter], WAD);
+    uint256 penaltyShares = withdraw(penaltyAssets, address(this), onBehalf);
+    emit EventsLib.ForceDeallocate(msg.sender, adapter, assets, onBehalf, ids, penaltyAssets);
+    return penaltyShares;
+}
+```
+
+<Info>
+A penalty of up to 2% can be set per adapter to disincentivize allocation manipulation and prevent abuse of relative caps. The penalty is paid by burning shares from the user.
+</Info>
+
+### Exit strategy
+
+If a user has `A` assets in the vault and the vault is fully illiquid, the optimal amount to force deallocate is:
+
+```
+min(liquidity_of_market, A / (1 + penalty))
+```
+
+This ensures either the market is empty or no shares nor liquidity remain after exiting.
+
+## Curator timelocks
+
+Timelocks provide a time delay between when a configuration change is submitted and when it can be executed, giving users time to react.
+
+### Timelocked operations
+
+All curator configuration changes are timelockable except:
+- `decreaseAbsoluteCap` (not timelocked)
+- `decreaseRelativeCap` (not timelocked)
+
+<Warning>
+Increasing a timelock requires caution. Decreasing the timelock of a function is itself timelocked by that function's current timelock duration.
+</Warning>
+
+### Timelock workflow
+
+1. **Submit** - Curator submits a configuration change via `submit(bytes calldata data)`
+2. **Wait** - The change must wait for the timelock duration to pass
+3. **Execute** - Anyone can execute the change after the timelock expires
+
+```solidity
+// VaultV2.sol:348-359
+function submit(bytes calldata data) external {
+    require(msg.sender == curator, ErrorsLib.Unauthorized());
+    require(executableAt[data] == 0, ErrorsLib.DataAlreadyPending());
+    
+    bytes4 selector = bytes4(data);
+    uint256 _timelock = selector == IVaultV2.decreaseTimelock.selector 
+        ? timelock[bytes4(data[4:8])] 
+        : timelock[selector];
+    executableAt[data] = block.timestamp + _timelock;
+    emit EventsLib.Submit(selector, data, executableAt[data]);
+}
+```
+
+### Timelock management
+
+**Increasing timelocks**
+
+Timelocks can be increased via `increaseTimelock(bytes4 selector, uint256 newDuration)`:
+- Must be greater than or equal to current timelock
+- Existing pending operations can still execute at their original `executableAt` time
+- Cannot be used on `decreaseTimelock` selector itself
+
+**Decreasing timelocks**
+
+Timelocks can be decreased via `decreaseTimelock(bytes4 selector, uint256 newDuration)`:
+- The timelock for this operation is the current timelock of the function being modified
+- For example, decreasing the timelock of `addAdapter` is timelocked by `timelock[addAdapter]`
+- Cannot be used on `decreaseTimelock` selector itself
+
+### Abdication
+
+Functions can be permanently disabled by calling `abdicate(bytes4 selector)`:
+- The function can never be called again, regardless of timelock settings
+- Useful for committing to immutability of specific configurations
+- Cannot be reversed
+
+<Note>
+When a function is abdicated, it's still possible to submit data for it or change its timelock, but these actions will have no effect as the function remains unexecutable.
+</Note>
+
+### Sentinel powers
+
+Sentinels can quickly derisk a vault by:
+- Revoking pending timelocked actions via `revoke(bytes calldata data)`
+- Deallocating funds to idle
+- Decreasing absolute and relative caps (not timelocked)
+
+This provides an emergency mechanism while preserving the non-custodial guarantees.
+
+## Security guarantees
+
+The combination of timelocks and in-kind redemptions ensures:
+
+1. **Exit before harm** - Users can always exit before configuration changes that might negatively impact them
+2. **Permissionless exits** - `forceDeallocate` is callable by anyone, ensuring users can exit even when allocators don't cooperate
+3. **Predictable changes** - All critical configuration changes are announced via timelocks
+4. **Emergency override** - Sentinels can quickly reduce risk without going through timelocks
+
+<Info>
+The vault itself is immutable. All configuration is managed through these timelocked mechanisms, ensuring transparency and predictability for depositors.
+</Info>
+
+## Best practices
+
+For vault curators:
+- Set appropriate timelocks based on the liquidity profile of underlying markets
+- Consider longer timelocks for critical functions like `addAdapter` and gate changes
+- Use `abdicate` to commit to certain configurations permanently
+- Keep force deallocate penalties reasonable (typically 0-2%)
+
+For vault users:
+- Monitor pending timelocked operations via events
+- Understand the timelock settings for critical functions
+- Know how to use `forceDeallocate` for emergency exits
+- Factor in force deallocate penalties when evaluating exit options

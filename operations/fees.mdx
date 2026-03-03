@@ -1,0 +1,329 @@
+---
+title: Performance and management fees
+description: Understand fee structures, calculations, and configuration in Morpho Vault V2
+---
+
+## Overview
+
+Morpho Vault V2 supports two types of fees that are paid to designated recipients through share minting:
+
+- **Performance fee**: Charged on vault profits (interest earned)
+- **Management fee**: Charged continuously based on total assets
+
+<Info>
+Fees are denominated in WAD (1e18), where 1e18 represents 100%. Both fees are paid by minting new shares to fee recipients rather than transferring assets.
+</Info>
+
+## Fee limits
+
+The protocol enforces maximum fee levels:
+
+```solidity
+MAX_PERFORMANCE_FEE = 0.5e18;     // 50% maximum
+MAX_MANAGEMENT_FEE = 0.05e18 / 365 days;  // 5% per year maximum
+```
+
+Source: `ConstantsLib.sol:10-11`
+
+## Performance fee
+
+The performance fee is taken on distributed interest (profits after applying the max rate).
+
+### Setting performance fee
+
+```solidity
+function setPerformanceFee(uint256 newPerformanceFee) external;
+```
+
+<Steps>
+  <Step title="Submit through timelock">
+    The curator must submit the change through the timelock mechanism.
+  </Step>
+  
+  <Step title="Wait for timelock">
+    Wait for the timelock period to expire.
+  </Step>
+  
+  <Step title="Execute change">
+    Call `setPerformanceFee()` to apply the new fee. Interest is accrued first.
+  </Step>
+</Steps>
+
+### Example
+
+```solidity
+// Set a 20% performance fee
+vault.setPerformanceFee(0.2e18);
+```
+
+<Warning>
+Requirements:
+- Fee must not exceed `MAX_PERFORMANCE_FEE` (50%)
+- Fee recipient must be set if fee is non-zero
+- Interest is accrued before applying the new fee
+</Warning>
+
+Source: `VaultV2.sol:482-492`
+
+### Performance fee calculation
+
+The performance fee is calculated on interest earned:
+
+```solidity
+// Interest = newTotalAssets - _totalAssets (capped by maxRate)
+uint256 interest = newTotalAssets.zeroFloorSub(_totalAssets);
+
+// Performance fee assets
+uint256 performanceFeeAssets = interest > 0 && performanceFee > 0
+    ? interest.mulDivDown(performanceFee, WAD)
+    : 0;
+
+// Convert to shares
+uint256 performanceFeeShares = performanceFeeAssets.mulDivDown(
+    totalSupply + virtualShares,
+    newTotalAssetsWithoutFees + 1
+);
+```
+
+Source: `VaultV2.sol:673-688`
+
+<Note>
+Performance fee assets may round down to zero if `interest * fee < WAD`. This means very small interest amounts may not generate fee shares.
+</Note>
+
+## Management fee
+
+The management fee is charged continuously on total assets, similar to a streaming fee.
+
+### Setting management fee
+
+```solidity
+function setManagementFee(uint256 newManagementFee) external;
+```
+
+### Example
+
+```solidity
+// Set a 2% annual management fee
+vault.setManagementFee(0.02e18 / 365 days);
+```
+
+<Warning>
+Requirements:
+- Fee must not exceed `MAX_MANAGEMENT_FEE` (5% annually)
+- Fee recipient must be set if fee is non-zero
+- Interest is accrued before applying the new fee
+</Warning>
+
+Source: `VaultV2.sol:494-504`
+
+### Management fee calculation
+
+The management fee accrues over time based on total assets:
+
+```solidity
+// Time elapsed since last update
+uint256 elapsed = block.timestamp - lastUpdate;
+
+// Management fee assets
+uint256 managementFeeAssets = elapsed > 0 && managementFee > 0
+    ? (newTotalAssets * elapsed).mulDivDown(managementFee, WAD)
+    : 0;
+
+// Convert to shares
+uint256 managementFeeShares = managementFeeAssets.mulDivDown(
+    totalSupply + virtualShares,
+    newTotalAssetsWithoutFees + 1
+);
+```
+
+Source: `VaultV2.sol:681-690`
+
+<Info>
+The management fee is taken on `newTotalAssets` to make all approximations consistent. Interacting less with the vault results in higher accrued fees.
+</Info>
+
+## Fee recipients
+
+Each fee has a designated recipient address that receives minted shares.
+
+### Setting fee recipients
+
+```solidity
+function setPerformanceFeeRecipient(address newPerformanceFeeRecipient) external;
+function setManagementFeeRecipient(address newManagementFeeRecipient) external;
+```
+
+### Example
+
+```solidity
+// Set recipients
+vault.setPerformanceFeeRecipient(treasuryAddress);
+vault.setManagementFeeRecipient(teamAddress);
+```
+
+<Warning>
+Fee invariant: A fee cannot be non-zero if its recipient is the zero address. The contract enforces:
+```solidity
+require(
+    newPerformanceFeeRecipient != address(0) || performanceFee == 0,
+    ErrorsLib.FeeInvariantBroken()
+);
+```
+</Warning>
+
+Source: `VaultV2.sol:506-524`
+
+## Fee accrual
+
+Fees are accrued and paid during the first interaction of each transaction:
+
+```solidity
+function accrueInterest() public {
+    (uint256 newTotalAssets, uint256 performanceFeeShares, uint256 managementFeeShares) = 
+        accrueInterestView();
+    
+    _totalAssets = newTotalAssets.toUint128();
+    
+    if (performanceFeeShares != 0) {
+        createShares(performanceFeeRecipient, performanceFeeShares);
+    }
+    
+    if (managementFeeShares != 0) {
+        createShares(managementFeeRecipient, managementFeeShares);
+    }
+    
+    lastUpdate = uint64(block.timestamp);
+}
+```
+
+Source: `VaultV2.sol:648-656`
+
+### Accrual timing
+
+<Info>
+Interest and fees are accrued only once per transaction, during the first vault interaction. Subsequent interactions in the same transaction use the already-updated values.
+</Info>
+
+This prevents:
+- Multiple fee charges in a single transaction
+- Flashloan-based manipulation of fee calculations
+
+## Fee impact on share price
+
+### Performance fee
+
+Performance fees are taken from distributed interest, so they don't reduce the share price—they dilute profits:
+
+```solidity
+// Without performance fee:
+// 100 assets, 100 shares → 1.0 share price
+// +10 interest → 110 assets, 100 shares → 1.1 share price (+10%)
+
+// With 20% performance fee:
+// 100 assets, 100 shares → 1.0 share price  
+// +10 interest, -2 fee → 110 assets, 101.8 shares → 1.08 share price (+8%)
+```
+
+### Management fee
+
+Management fees are taken from total assets and **can reduce share price**:
+
+```solidity
+// Management fee accrues even if the vault has losses
+// 100 assets, 100 shares → 1.0 share price
+// Time passes, 0.5 assets management fee → 100 assets, 100.5 shares → 0.995 share price
+```
+
+<Warning>
+The management fee is not bound to interest. It accrues even when the vault incurs losses, which can decrease the share price.
+</Warning>
+
+Source: `VaultV2.sol:659-660`
+
+## Fee rounding
+
+Both fees are rounded down:
+
+```solidity
+// Performance fee uses mulDivDown
+performanceFeeAssets = interest.mulDivDown(performanceFee, WAD);
+
+// Management fee uses mulDivDown  
+managementFeeAssets = (newTotalAssets * elapsed).mulDivDown(managementFee, WAD);
+```
+
+<Note>
+Fee recipients may receive slightly less than the theoretical fee amount due to rounding down. This protects users from overpayment.
+</Note>
+
+Source: `VaultV2.sol:661`
+
+## Viewing accrued fees
+
+To preview fees without state changes:
+
+```solidity
+(
+    uint256 newTotalAssets,
+    uint256 performanceFeeShares,
+    uint256 managementFeeShares
+) = vault.accrueInterestView();
+```
+
+This returns:
+- `newTotalAssets`: Total assets after accruing interest
+- `performanceFeeShares`: Shares to mint for performance fee
+- `managementFeeShares`: Shares to mint for management fee
+
+Source: `VaultV2.sol:664-693`
+
+## Fee-related gates
+
+Fee recipients must be able to receive shares:
+
+```solidity
+function accrueInterestView() public view returns (uint256, uint256, uint256) {
+    // ...
+    uint256 performanceFeeAssets = interest > 0 
+        && performanceFee > 0 
+        && canReceiveShares(performanceFeeRecipient)
+        ? interest.mulDivDown(performanceFee, WAD)
+        : 0;
+    // ...
+}
+```
+
+If a fee recipient cannot receive shares (blocked by `receiveSharesGate`), the fee is not charged.
+
+Source: `VaultV2.sol:676-682`
+
+## Timelocks and governance
+
+All fee-related changes go through curator timelocks:
+
+<Steps>
+  <Step title="Submit proposal">
+    Curator calls `submit()` with encoded function call.
+  </Step>
+  
+  <Step title="Timelock period">
+    Wait for the timelock duration specific to the function.
+  </Step>
+  
+  <Step title="Execute">
+    Call the actual function (e.g., `setPerformanceFee()`) after timelock expires.
+  </Step>
+</Steps>
+
+This ensures users have notice before fee changes take effect.
+
+## Best practices
+
+- Set reasonable fees that align with vault strategy and performance
+- Always set fee recipients before setting non-zero fees
+- Accrue interest at least every 10 years to prevent fee calculation overflows
+- Monitor that fee recipients can receive shares (not blocked by gates)
+- Consider the impact of management fees during loss periods
+
+Source: `VaultV2.sol:685`

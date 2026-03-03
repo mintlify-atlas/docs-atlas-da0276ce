@@ -1,0 +1,289 @@
+---
+title: Gate system
+description: Control access to vault deposits, withdrawals, and share transfers using external gate contracts
+---
+
+Morpho Vault V2 implements a flexible gate system that allows curators to control who can interact with the vault. Gates are external contracts that implement specific interfaces to permit or deny operations.
+
+## Overview
+
+Gates provide granular access control over four distinct operations:
+
+- **Share transfers** - Control who can send and receive vault shares
+- **Asset operations** - Control who can deposit and withdraw vault assets
+
+If a gate is not set (address zero), the corresponding operations are unrestricted.
+
+<Note>
+Gates are set by the curator and changes go through timelocks, ensuring users have time to exit before new restrictions take effect.
+</Note>
+
+## Gate types
+
+Vault V2 defines four independent gate types:
+
+### Receive shares gate
+
+```solidity
+interface IReceiveSharesGate {
+    function canReceiveShares(address account) external view returns (bool);
+}
+```
+
+- Controls permission to receive vault shares
+- Applied on: `deposit`, `mint`, `transfer`, `transferFrom`
+- Can lock users out of getting back shares deposited on other contracts
+
+### Send shares gate
+
+```solidity
+interface ISendSharesGate {
+    function canSendShares(address account) external view returns (bool);
+}
+```
+
+- Controls permission to send vault shares
+- Applied on: `withdraw`, `redeem`, `transfer`, `transferFrom`, `forceDeallocate`
+- Can lock users out of exiting the vault
+
+<Warning>
+Send shares gate can prevent users from withdrawing. Design gate logic carefully to avoid locking users' funds.
+</Warning>
+
+### Receive assets gate
+
+```solidity
+interface IReceiveAssetsGate {
+    function canReceiveAssets(address account) external view returns (bool);
+}
+```
+
+- Controls permission to receive assets when withdrawing from the vault
+- Applied on: `withdraw`, `redeem`
+- The vault itself (`address(this)`) is always allowed to receive assets, regardless of gate configuration
+- Can lock users out of exiting the vault
+
+### Send assets gate
+
+```solidity
+interface ISendAssetsGate {
+    function canSendAssets(address account) external view returns (bool);
+}
+```
+
+- Controls permission to deposit assets into the vault  
+- Applied on: `deposit`, `mint`
+- Not critical (cannot block users' funds already in the vault)
+- Can be used to gate new deposits
+
+## Implementation example
+
+Here's a complete gate implementation that works with Bundler3:
+
+```solidity
+contract GateExample is IReceiveSharesGate, ISendSharesGate, 
+                         IReceiveAssetsGate, ISendAssetsGate {
+    address public owner;
+    mapping(address => bool) public isBundlerAdapter;
+    mapping(address => bool) public whitelisted;
+
+    constructor(address _owner) {
+        owner = _owner;
+    }
+
+    function setIsWhitelisted(address account, bool newIsWhitelisted) external {
+        require(msg.sender == owner, Unauthorized());
+        whitelisted[account] = newIsWhitelisted;
+    }
+
+    function setIsBundlerAdapter(address account, bool newIsBundlerAdapter) external {
+        require(msg.sender == owner, Unauthorized());
+        isBundlerAdapter[account] = newIsBundlerAdapter;
+    }
+
+    function canSendShares(address account) external view returns (bool) {
+        return whitelistedOrHandlingOnBehalf(account);
+    }
+
+    function canReceiveShares(address account) external view returns (bool) {
+        return whitelistedOrHandlingOnBehalf(account);
+    }
+
+    function canReceiveAssets(address account) external view returns (bool) {
+        return whitelistedOrHandlingOnBehalf(account);
+    }
+
+    function canSendAssets(address account) external view returns (bool) {
+        return whitelistedOrHandlingOnBehalf(account);
+    }
+
+    function whitelistedOrHandlingOnBehalf(address account) internal view returns (bool) {
+        return whitelisted[account]
+            || (isBundlerAdapter[account] && 
+                whitelisted[IBundlerAdapter(account).BUNDLER3().initiator()]);
+    }
+}
+```
+
+<Info>
+This example uses a single whitelist for all permissions and supports Bundler3 for delegated operations on behalf of whitelisted users.
+</Info>
+
+## Gate configuration
+
+Gates are set by the curator using timelocked functions:
+
+```solidity
+// VaultV2.sol:387-409
+function setReceiveSharesGate(address newReceiveSharesGate) external {
+    timelocked();
+    receiveSharesGate = newReceiveSharesGate;
+    emit EventsLib.SetReceiveSharesGate(newReceiveSharesGate);
+}
+
+function setSendSharesGate(address newSendSharesGate) external {
+    timelocked();
+    sendSharesGate = newSendSharesGate;
+    emit EventsLib.SetSendSharesGate(newSendSharesGate);
+}
+
+function setReceiveAssetsGate(address newReceiveAssetsGate) external {
+    timelocked();
+    receiveAssetsGate = newReceiveAssetsGate;
+    emit EventsLib.SetReceiveAssetsGate(newReceiveAssetsGate);
+}
+
+function setSendAssetsGate(address newSendAssetsGate) external {
+    timelocked();
+    sendAssetsGate = newSendAsstsGate;
+    emit EventsLib.SetSendAssetsGate(newSendAssetsGate);
+}
+```
+
+To disable a gate, set it to `address(0)`.
+
+## Gate enforcement
+
+The vault checks gates using internal view functions:
+
+```solidity
+// VaultV2.sol:922-937
+function canReceiveShares(address account) public view returns (bool) {
+    return receiveSharesGate == address(0) 
+        || IReceiveSharesGate(receiveSharesGate).canReceiveShares(account);
+}
+
+function canSendShares(address account) public view returns (bool) {
+    return sendSharesGate == address(0) 
+        || ISendSharesGate(sendSharesGate).canSendShares(account);
+}
+
+function canReceiveAssets(address account) public view returns (bool) {
+    return account == address(this) 
+        || receiveAssetsGate == address(0)
+        || IReceiveAssetsGate(receiveAssetsGate).canReceiveAssets(account);
+}
+
+function canSendAssets(address account) public view returns (bool) {
+    return sendAssetsGate == address(0) 
+        || ISendAssetsGate(sendAssetsGate).canSendAssets(account);
+}
+```
+
+## Design requirements
+
+<Warning>
+Gates must adhere to strict requirements to avoid breaking vault functionality:
+</Warning>
+
+1. **Never revert** - Gates must return `true` or `false`, never revert
+2. **Low gas consumption** - Gates should not consume excessive gas
+3. **Predictable behavior** - Gate logic should be transparent and deterministic
+
+## Use cases
+
+### Whitelisting
+
+Restrict vault access to approved addresses:
+
+```solidity
+mapping(address => bool) public whitelisted;
+
+function canReceiveShares(address account) external view returns (bool) {
+    return whitelisted[account];
+}
+```
+
+### KYC/AML compliance
+
+Integrate with identity verification services:
+
+```solidity
+function canSendAssets(address account) external view returns (bool) {
+    return kycRegistry.isVerified(account);
+}
+```
+
+### Jurisdictional restrictions
+
+Block addresses from restricted jurisdictions:
+
+```solidity
+function canReceiveShares(address account) external view returns (bool) {
+    return !jurisdictionBlocklist[account];
+}
+```
+
+### Delegated access with Bundler3
+
+Allow whitelisted users to interact via Bundler3:
+
+```solidity
+function canSendShares(address account) external view returns (bool) {
+    if (whitelisted[account]) return true;
+    if (isBundlerAdapter[account]) {
+        address initiator = IBundlerAdapter(account).BUNDLER3().initiator();
+        return whitelisted[initiator];
+    }
+    return false;
+}
+```
+
+## Security considerations
+
+### Gate vulnerabilities
+
+1. **Locked funds** - Improperly designed send gates can permanently lock user funds
+2. **Centralization risk** - Gate owners control access; consider time delays for changes
+3. **Gas griefing** - Gas-heavy gates can DOS vault operations
+4. **Upgradeable gates** - If gates are upgradeable, users face additional trust assumptions
+
+### Best practices
+
+<Info>
+For vault curators:
+- Audit gate contracts thoroughly before deployment
+- Set appropriate timelocks for gate changes
+- Test gate behavior under all edge cases
+- Consider gradual rollout for new gate implementations
+- Document gate logic clearly for users
+</Info>
+
+For vault users:
+- Understand gate restrictions before depositing
+- Monitor pending gate changes via timelock events
+- Verify gate contracts are not upgradeable or have appropriate governance
+- Exit before problematic gate changes take effect
+
+### Emergency considerations
+
+Even with restrictive gates:
+- `forceDeallocate` still allows in-kind redemptions (subject to send shares gate)
+- Sentinels cannot modify gates (only curator can)
+- Gate changes go through timelocks, allowing exit window
+
+## Initial configuration
+
+<Note>
+At vault creation, all gates are set to `address(0)` (disabled), meaning anybody can interact with the vault. To restrict access from the start, batch gate configuration with vault creation using `multicall`.
+</Note>

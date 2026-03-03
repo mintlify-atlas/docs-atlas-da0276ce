@@ -1,0 +1,1025 @@
+---
+title: IVaultV2
+description: Core vault interface extending ERC4626 and ERC2612 standards
+---
+
+# IVaultV2
+
+The main interface for Morpho Vault V2, extending the ERC4626 tokenized vault standard and ERC2612 permit functionality.
+
+```solidity
+interface IVaultV2 is IERC4626, IERC2612
+```
+
+## Structs
+
+### Caps
+
+Defines allocation and cap constraints for adapters.
+
+```solidity
+struct Caps {
+    uint256 allocation;
+    uint128 absoluteCap;
+    uint128 relativeCap;
+}
+```
+
+<ParamField name="allocation" type="uint256">
+  Current allocation amount for the adapter
+</ParamField>
+
+<ParamField name="absoluteCap" type="uint128">
+  Maximum absolute allocation cap in asset units
+</ParamField>
+
+<ParamField name="relativeCap" type="uint128">
+  Maximum relative allocation cap as a percentage of total assets
+</ParamField>
+
+## State variables
+
+### virtualShares
+
+```solidity
+function virtualShares() external view returns (uint256);
+```
+
+Returns the number of virtual shares used for exchange rate calculations.
+
+<ResponseField name="" type="uint256">
+  The virtual shares amount
+</ResponseField>
+
+### owner
+
+```solidity
+function owner() external view returns (address);
+```
+
+Returns the vault owner address.
+
+<ResponseField name="" type="address">
+  The owner address
+</ResponseField>
+
+### curator
+
+```solidity
+function curator() external view returns (address);
+```
+
+Returns the curator address who manages vault parameters.
+
+<ResponseField name="" type="address">
+  The curator address
+</ResponseField>
+
+### receiveSharesGate
+
+```solidity
+function receiveSharesGate() external view returns (address);
+```
+
+Returns the gate contract for receiving shares.
+
+<ResponseField name="" type="address">
+  The receive shares gate address
+</ResponseField>
+
+### sendSharesGate
+
+```solidity
+function sendSharesGate() external view returns (address);
+```
+
+Returns the gate contract for sending shares.
+
+<ResponseField name="" type="address">
+  The send shares gate address
+</ResponseField>
+
+### receiveAssetsGate
+
+```solidity
+function receiveAssetsGate() external view returns (address);
+```
+
+Returns the gate contract for receiving assets.
+
+<ResponseField name="" type="address">
+  The receive assets gate address
+</ResponseField>
+
+### sendAssetsGate
+
+```solidity
+function sendAssetsGate() external view returns (address);
+```
+
+Returns the gate contract for sending assets.
+
+<ResponseField name="" type="address">
+  The send assets gate address
+</ResponseField>
+
+### adapterRegistry
+
+```solidity
+function adapterRegistry() external view returns (address);
+```
+
+Returns the adapter registry contract address.
+
+<ResponseField name="" type="address">
+  The adapter registry address
+</ResponseField>
+
+### isSentinel
+
+```solidity
+function isSentinel(address account) external view returns (bool);
+```
+
+Checks if an account has sentinel privileges.
+
+<ParamField name="account" type="address">
+  The account to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account is a sentinel
+</ResponseField>
+
+### isAllocator
+
+```solidity
+function isAllocator(address account) external view returns (bool);
+```
+
+Checks if an account has allocator privileges.
+
+<ParamField name="account" type="address">
+  The account to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account is an allocator
+</ResponseField>
+
+### firstTotalAssets
+
+```solidity
+function firstTotalAssets() external view returns (uint256);
+```
+
+Returns the total assets at the first interest accrual.
+
+<ResponseField name="" type="uint256">
+  The first total assets amount
+</ResponseField>
+
+### _totalAssets
+
+```solidity
+function _totalAssets() external view returns (uint128);
+```
+
+Returns the internal total assets tracker.
+
+<ResponseField name="" type="uint128">
+  The internal total assets amount
+</ResponseField>
+
+### lastUpdate
+
+```solidity
+function lastUpdate() external view returns (uint64);
+```
+
+Returns the timestamp of the last interest accrual.
+
+<ResponseField name="" type="uint64">
+  The last update timestamp
+</ResponseField>
+
+### maxRate
+
+```solidity
+function maxRate() external view returns (uint64);
+```
+
+Returns the maximum allowed interest rate.
+
+<ResponseField name="" type="uint64">
+  The maximum rate
+</ResponseField>
+
+### adapters
+
+```solidity
+function adapters(uint256 index) external view returns (address);
+```
+
+Returns the adapter at the given index.
+
+<ParamField name="index" type="uint256">
+  The index in the adapters array
+</ParamField>
+
+<ResponseField name="" type="address">
+  The adapter address at the index
+</ResponseField>
+
+### adaptersLength
+
+```solidity
+function adaptersLength() external view returns (uint256);
+```
+
+Returns the total number of adapters.
+
+<ResponseField name="" type="uint256">
+  The number of adapters
+</ResponseField>
+
+### isAdapter
+
+```solidity
+function isAdapter(address account) external view returns (bool);
+```
+
+Checks if an address is a registered adapter.
+
+<ParamField name="account" type="address">
+  The address to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the address is an adapter
+</ResponseField>
+
+### allocation
+
+```solidity
+function allocation(bytes32 id) external view returns (uint256);
+```
+
+Returns the current allocation for a market ID.
+
+<ParamField name="id" type="bytes32">
+  The market identifier
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The current allocation amount
+</ResponseField>
+
+### absoluteCap
+
+```solidity
+function absoluteCap(bytes32 id) external view returns (uint256);
+```
+
+Returns the absolute cap for a market ID.
+
+<ParamField name="id" type="bytes32">
+  The market identifier
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The absolute cap amount
+</ResponseField>
+
+### relativeCap
+
+```solidity
+function relativeCap(bytes32 id) external view returns (uint256);
+```
+
+Returns the relative cap for a market ID.
+
+<ParamField name="id" type="bytes32">
+  The market identifier
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The relative cap percentage
+</ResponseField>
+
+### forceDeallocatePenalty
+
+```solidity
+function forceDeallocatePenalty(address adapter) external view returns (uint256);
+```
+
+Returns the penalty for force deallocating from an adapter.
+
+<ParamField name="adapter" type="address">
+  The adapter address
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The penalty amount
+</ResponseField>
+
+### liquidityAdapter
+
+```solidity
+function liquidityAdapter() external view returns (address);
+```
+
+Returns the current liquidity adapter address.
+
+<ResponseField name="" type="address">
+  The liquidity adapter address
+</ResponseField>
+
+### liquidityData
+
+```solidity
+function liquidityData() external view returns (bytes memory);
+```
+
+Returns the liquidity adapter configuration data.
+
+<ResponseField name="" type="bytes">
+  The liquidity data
+</ResponseField>
+
+### timelock
+
+```solidity
+function timelock(bytes4 selector) external view returns (uint256);
+```
+
+Returns the timelock duration for a function selector.
+
+<ParamField name="selector" type="bytes4">
+  The function selector
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The timelock duration in seconds
+</ResponseField>
+
+### abdicated
+
+```solidity
+function abdicated(bytes4 selector) external view returns (bool);
+```
+
+Checks if the curator has abdicated control of a function.
+
+<ParamField name="selector" type="bytes4">
+  The function selector
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if abdicated
+</ResponseField>
+
+### executableAt
+
+```solidity
+function executableAt(bytes memory data) external view returns (uint256);
+```
+
+Returns the timestamp when a timelocked call becomes executable.
+
+<ParamField name="data" type="bytes">
+  The encoded function call data
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The executable timestamp
+</ResponseField>
+
+### performanceFee
+
+```solidity
+function performanceFee() external view returns (uint96);
+```
+
+Returns the performance fee percentage.
+
+<ResponseField name="" type="uint96">
+  The performance fee
+</ResponseField>
+
+### performanceFeeRecipient
+
+```solidity
+function performanceFeeRecipient() external view returns (address);
+```
+
+Returns the performance fee recipient address.
+
+<ResponseField name="" type="address">
+  The performance fee recipient
+</ResponseField>
+
+### managementFee
+
+```solidity
+function managementFee() external view returns (uint96);
+```
+
+Returns the management fee percentage.
+
+<ResponseField name="" type="uint96">
+  The management fee
+</ResponseField>
+
+### managementFeeRecipient
+
+```solidity
+function managementFeeRecipient() external view returns (address);
+```
+
+Returns the management fee recipient address.
+
+<ResponseField name="" type="address">
+  The management fee recipient
+</ResponseField>
+
+## Gating
+
+### canSendShares
+
+```solidity
+function canSendShares(address account) external view returns (bool);
+```
+
+Checks if an account can send shares.
+
+<ParamField name="account" type="address">
+  The account to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account can send shares
+</ResponseField>
+
+### canReceiveShares
+
+```solidity
+function canReceiveShares(address account) external view returns (bool);
+```
+
+Checks if an account can receive shares.
+
+<ParamField name="account" type="address">
+  The account to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account can receive shares
+</ResponseField>
+
+### canSendAssets
+
+```solidity
+function canSendAssets(address account) external view returns (bool);
+```
+
+Checks if an account can send assets.
+
+<ParamField name="account" type="address">
+  The account to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account can send assets
+</ResponseField>
+
+### canReceiveAssets
+
+```solidity
+function canReceiveAssets(address account) external view returns (bool);
+```
+
+Checks if an account can receive assets.
+
+<ParamField name="account" type="address">
+  The account to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account can receive assets
+</ResponseField>
+
+## Multicall
+
+### multicall
+
+```solidity
+function multicall(bytes[] memory data) external;
+```
+
+Executes multiple function calls in a single transaction.
+
+<ParamField name="data" type="bytes[]">
+  Array of encoded function calls
+</ParamField>
+
+## Owner functions
+
+### setOwner
+
+```solidity
+function setOwner(address newOwner) external;
+```
+
+Sets a new vault owner.
+
+<ParamField name="newOwner" type="address">
+  The new owner address
+</ParamField>
+
+### setCurator
+
+```solidity
+function setCurator(address newCurator) external;
+```
+
+Sets a new curator.
+
+<ParamField name="newCurator" type="address">
+  The new curator address
+</ParamField>
+
+### setIsSentinel
+
+```solidity
+function setIsSentinel(address account, bool isSentinel) external;
+```
+
+Grants or revokes sentinel privileges.
+
+<ParamField name="account" type="address">
+  The account to modify
+</ParamField>
+
+<ParamField name="isSentinel" type="bool">
+  True to grant sentinel status, false to revoke
+</ParamField>
+
+### setName
+
+```solidity
+function setName(string memory newName) external;
+```
+
+Sets a new vault name.
+
+<ParamField name="newName" type="string">
+  The new vault name
+</ParamField>
+
+### setSymbol
+
+```solidity
+function setSymbol(string memory newSymbol) external;
+```
+
+Sets a new vault symbol.
+
+<ParamField name="newSymbol" type="string">
+  The new vault symbol
+</ParamField>
+
+## Timelocks for curator functions
+
+### submit
+
+```solidity
+function submit(bytes memory data) external;
+```
+
+Submits a timelocked function call.
+
+<ParamField name="data" type="bytes">
+  The encoded function call data
+</ParamField>
+
+### revoke
+
+```solidity
+function revoke(bytes memory data) external;
+```
+
+Revokes a pending timelocked function call.
+
+<ParamField name="data" type="bytes">
+  The encoded function call data to revoke
+</ParamField>
+
+## Curator functions
+
+### setIsAllocator
+
+```solidity
+function setIsAllocator(address account, bool newIsAllocator) external;
+```
+
+Grants or revokes allocator privileges.
+
+<ParamField name="account" type="address">
+  The account to modify
+</ParamField>
+
+<ParamField name="newIsAllocator" type="bool">
+  True to grant allocator status, false to revoke
+</ParamField>
+
+### setReceiveSharesGate
+
+```solidity
+function setReceiveSharesGate(address newReceiveSharesGate) external;
+```
+
+Sets the receive shares gate contract.
+
+<ParamField name="newReceiveSharesGate" type="address">
+  The new receive shares gate address
+</ParamField>
+
+### setSendSharesGate
+
+```solidity
+function setSendSharesGate(address newSendSharesGate) external;
+```
+
+Sets the send shares gate contract.
+
+<ParamField name="newSendSharesGate" type="address">
+  The new send shares gate address
+</ParamField>
+
+### setReceiveAssetsGate
+
+```solidity
+function setReceiveAssetsGate(address newReceiveAssetsGate) external;
+```
+
+Sets the receive assets gate contract.
+
+<ParamField name="newReceiveAssetsGate" type="address">
+  The new receive assets gate address
+</ParamField>
+
+### setSendAssetsGate
+
+```solidity
+function setSendAssetsGate(address newSendAssetsGate) external;
+```
+
+Sets the send assets gate contract.
+
+<ParamField name="newSendAssetsGate" type="address">
+  The new send assets gate address
+</ParamField>
+
+### setAdapterRegistry
+
+```solidity
+function setAdapterRegistry(address newAdapterRegistry) external;
+```
+
+Sets the adapter registry contract.
+
+<ParamField name="newAdapterRegistry" type="address">
+  The new adapter registry address
+</ParamField>
+
+### addAdapter
+
+```solidity
+function addAdapter(address account) external;
+```
+
+Adds a new adapter to the vault.
+
+<ParamField name="account" type="address">
+  The adapter address to add
+</ParamField>
+
+### removeAdapter
+
+```solidity
+function removeAdapter(address account) external;
+```
+
+Removes an adapter from the vault.
+
+<ParamField name="account" type="address">
+  The adapter address to remove
+</ParamField>
+
+### increaseTimelock
+
+```solidity
+function increaseTimelock(bytes4 selector, uint256 newDuration) external;
+```
+
+Increases the timelock duration for a function.
+
+<ParamField name="selector" type="bytes4">
+  The function selector
+</ParamField>
+
+<ParamField name="newDuration" type="uint256">
+  The new timelock duration in seconds
+</ParamField>
+
+### decreaseTimelock
+
+```solidity
+function decreaseTimelock(bytes4 selector, uint256 newDuration) external;
+```
+
+Decreases the timelock duration for a function.
+
+<ParamField name="selector" type="bytes4">
+  The function selector
+</ParamField>
+
+<ParamField name="newDuration" type="uint256">
+  The new timelock duration in seconds
+</ParamField>
+
+### abdicate
+
+```solidity
+function abdicate(bytes4 selector) external;
+```
+
+Abdicates curator control of a function.
+
+<ParamField name="selector" type="bytes4">
+  The function selector to abdicate
+</ParamField>
+
+### setPerformanceFee
+
+```solidity
+function setPerformanceFee(uint256 newPerformanceFee) external;
+```
+
+Sets the performance fee percentage.
+
+<ParamField name="newPerformanceFee" type="uint256">
+  The new performance fee
+</ParamField>
+
+### setManagementFee
+
+```solidity
+function setManagementFee(uint256 newManagementFee) external;
+```
+
+Sets the management fee percentage.
+
+<ParamField name="newManagementFee" type="uint256">
+  The new management fee
+</ParamField>
+
+### setPerformanceFeeRecipient
+
+```solidity
+function setPerformanceFeeRecipient(address newPerformanceFeeRecipient) external;
+```
+
+Sets the performance fee recipient.
+
+<ParamField name="newPerformanceFeeRecipient" type="address">
+  The new performance fee recipient address
+</ParamField>
+
+### setManagementFeeRecipient
+
+```solidity
+function setManagementFeeRecipient(address newManagementFeeRecipient) external;
+```
+
+Sets the management fee recipient.
+
+<ParamField name="newManagementFeeRecipient" type="address">
+  The new management fee recipient address
+</ParamField>
+
+### increaseAbsoluteCap
+
+```solidity
+function increaseAbsoluteCap(bytes memory idData, uint256 newAbsoluteCap) external;
+```
+
+Increases the absolute cap for a market.
+
+<ParamField name="idData" type="bytes">
+  The encoded market identifier data
+</ParamField>
+
+<ParamField name="newAbsoluteCap" type="uint256">
+  The new absolute cap amount
+</ParamField>
+
+### decreaseAbsoluteCap
+
+```solidity
+function decreaseAbsoluteCap(bytes memory idData, uint256 newAbsoluteCap) external;
+```
+
+Decreases the absolute cap for a market.
+
+<ParamField name="idData" type="bytes">
+  The encoded market identifier data
+</ParamField>
+
+<ParamField name="newAbsoluteCap" type="uint256">
+  The new absolute cap amount
+</ParamField>
+
+### increaseRelativeCap
+
+```solidity
+function increaseRelativeCap(bytes memory idData, uint256 newRelativeCap) external;
+```
+
+Increases the relative cap for a market.
+
+<ParamField name="idData" type="bytes">
+  The encoded market identifier data
+</ParamField>
+
+<ParamField name="newRelativeCap" type="uint256">
+  The new relative cap percentage
+</ParamField>
+
+### decreaseRelativeCap
+
+```solidity
+function decreaseRelativeCap(bytes memory idData, uint256 newRelativeCap) external;
+```
+
+Decreases the relative cap for a market.
+
+<ParamField name="idData" type="bytes">
+  The encoded market identifier data
+</ParamField>
+
+<ParamField name="newRelativeCap" type="uint256">
+  The new relative cap percentage
+</ParamField>
+
+### setMaxRate
+
+```solidity
+function setMaxRate(uint256 newMaxRate) external;
+```
+
+Sets the maximum allowed interest rate.
+
+<ParamField name="newMaxRate" type="uint256">
+  The new maximum rate
+</ParamField>
+
+### setForceDeallocatePenalty
+
+```solidity
+function setForceDeallocatePenalty(address adapter, uint256 newForceDeallocatePenalty) external;
+```
+
+Sets the penalty for force deallocating from an adapter.
+
+<ParamField name="adapter" type="address">
+  The adapter address
+</ParamField>
+
+<ParamField name="newForceDeallocatePenalty" type="uint256">
+  The new penalty amount
+</ParamField>
+
+## Allocator functions
+
+### allocate
+
+```solidity
+function allocate(address adapter, bytes memory data, uint256 assets) external;
+```
+
+Allocates assets to an adapter.
+
+<ParamField name="adapter" type="address">
+  The adapter address
+</ParamField>
+
+<ParamField name="data" type="bytes">
+  Adapter-specific allocation data
+</ParamField>
+
+<ParamField name="assets" type="uint256">
+  The amount of assets to allocate
+</ParamField>
+
+### deallocate
+
+```solidity
+function deallocate(address adapter, bytes memory data, uint256 assets) external;
+```
+
+Deallocates assets from an adapter.
+
+<ParamField name="adapter" type="address">
+  The adapter address
+</ParamField>
+
+<ParamField name="data" type="bytes">
+  Adapter-specific deallocation data
+</ParamField>
+
+<ParamField name="assets" type="uint256">
+  The amount of assets to deallocate
+</ParamField>
+
+### setLiquidityAdapterAndData
+
+```solidity
+function setLiquidityAdapterAndData(address newLiquidityAdapter, bytes memory newLiquidityData) external;
+```
+
+Sets the liquidity adapter and its configuration data.
+
+<ParamField name="newLiquidityAdapter" type="address">
+  The new liquidity adapter address
+</ParamField>
+
+<ParamField name="newLiquidityData" type="bytes">
+  The new liquidity adapter configuration data
+</ParamField>
+
+## Exchange rate
+
+### accrueInterest
+
+```solidity
+function accrueInterest() external;
+```
+
+Accrues interest and updates the vault's exchange rate.
+
+### accrueInterestView
+
+```solidity
+function accrueInterestView()
+    external
+    view
+    returns (uint256 newTotalAssets, uint256 performanceFeeShares, uint256 managementFeeShares);
+```
+
+Simulates interest accrual without state changes.
+
+<ResponseField name="newTotalAssets" type="uint256">
+  The projected total assets after accrual
+</ResponseField>
+
+<ResponseField name="performanceFeeShares" type="uint256">
+  The performance fee shares to be minted
+</ResponseField>
+
+<ResponseField name="managementFeeShares" type="uint256">
+  The management fee shares to be minted
+</ResponseField>
+
+## Force deallocate
+
+### forceDeallocate
+
+```solidity
+function forceDeallocate(address adapter, bytes memory data, uint256 assets, address onBehalf)
+    external
+    returns (uint256 penaltyShares);
+```
+
+Force deallocates assets from an adapter with a penalty.
+
+<ParamField name="adapter" type="address">
+  The adapter address
+</ParamField>
+
+<ParamField name="data" type="bytes">
+  Adapter-specific deallocation data
+</ParamField>
+
+<ParamField name="assets" type="uint256">
+  The amount of assets to deallocate
+</ParamField>
+
+<ParamField name="onBehalf" type="address">
+  The address to receive the penalty shares
+</ParamField>
+
+<ResponseField name="penaltyShares" type="uint256">
+  The number of penalty shares minted to the caller
+</ResponseField>

@@ -1,0 +1,341 @@
+---
+title: Liquidity management
+description: How Morpho Vault V2 manages idle assets, liquidity adapters, and withdrawal flows
+---
+
+Allocators are responsible for ensuring users can withdraw assets at any time. This is achieved through managing idle liquidity, an optional liquidity adapter, and the permissionless `forceDeallocate` mechanism.
+
+## Liquidity sources
+
+The vault has three sources of liquidity for withdrawals:
+
+1. **Idle assets** - Tokens held directly by the vault
+2. **Liquidity adapter** - Optional adapter for primary liquidity
+3. **Force deallocation** - Permissionless withdrawal from any liquid adapter
+
+## Idle assets
+
+Idle assets are tokens held directly in the vault contract:
+
+```solidity
+uint256 idleAssets = IERC20(asset).balanceOf(address(this));
+```
+
+These assets:
+- Are used first during withdrawals
+- Don't earn yield from underlying markets
+- Provide instant liquidity without gas overhead
+
+<Info>
+Maintaining some idle assets reduces withdrawal gas costs and ensures instant liquidity for small withdrawals.
+</Info>
+
+## Liquidity adapter
+
+The liquidity adapter is an optional adapter used for deposits and withdrawals:
+
+```solidity
+address public liquidityAdapter;
+bytes public liquidityData;
+```
+
+### Setting the liquidity adapter
+
+Allocators can set the liquidity adapter:
+
+```solidity
+function setLiquidityAdapterAndData(address newLiquidityAdapter, bytes memory newLiquidityData) external {
+    require(isAllocator[msg.sender], ErrorsLib.Unauthorized());
+    liquidityAdapter = newLiquidityAdapter;
+    liquidityData = newLiquidityData;
+    emit EventsLib.SetLiquidityAdapterAndData(msg.sender, newLiquidityAdapter, newLiquidityData);
+}
+```
+
+<Note>
+Whether the liquidity adapter is valid is checked during allocate/deallocate operations, not when setting it.
+</Note>
+
+### Liquidity adapter behavior
+
+The same adapter and data are used for both deposits and withdrawals to maintain allocation consistency:
+
+<Accordion title="Why use the same adapter for entry and exit?">
+Using the same adapter for both entry and exit ensures that looping supply-withdraw or withdraw-supply generally doesn't change the allocation. This provides predictable behavior and prevents allocation drift from repeated deposit/withdrawal cycles.
+</Accordion>
+
+## Deposit flow
+
+When users deposit assets:
+
+```solidity
+function enter(uint256 assets, uint256 shares, address onBehalf) internal {
+    require(canReceiveShares(onBehalf), ErrorsLib.CannotReceiveShares());
+    require(canSendAssets(msg.sender), ErrorsLib.CannotSendAssets());
+
+    SafeERC20Lib.safeTransferFrom(asset, msg.sender, address(this), assets);
+    createShares(onBehalf, shares);
+    _totalAssets += assets.toUint128();
+    emit EventsLib.Deposit(msg.sender, onBehalf, assets, shares);
+
+    if (liquidityAdapter != address(0)) allocateInternal(liquidityAdapter, liquidityData, assets);
+}
+```
+
+<Steps>
+  <Step title="Transfer assets">
+    User transfers assets to the vault
+  </Step>
+  
+  <Step title="Mint shares">
+    Vault mints shares to the recipient
+  </Step>
+  
+  <Step title="Allocate to liquidity adapter">
+    If liquidity adapter is set, assets are automatically allocated to it
+  </Step>
+</Steps>
+
+<Warning>
+If a cap (absolute or relative) associated with the liquidity adapter's IDs is reached, deposits will revert. This is particularly likely when the vault is empty or almost empty due to relative cap checks.
+</Warning>
+
+## Withdrawal flow
+
+When users withdraw assets:
+
+```solidity
+function exit(uint256 assets, uint256 shares, address receiver, address onBehalf) internal {
+    require(canSendShares(onBehalf), ErrorsLib.CannotSendShares());
+    require(canReceiveAssets(receiver), ErrorsLib.CannotReceiveAssets());
+
+    uint256 idleAssets = IERC20(asset).balanceOf(address(this));
+    if (assets > idleAssets && liquidityAdapter != address(0)) {
+        deallocateInternal(liquidityAdapter, liquidityData, assets - idleAssets);
+    }
+
+    if (msg.sender != onBehalf) {
+        uint256 _allowance = allowance[onBehalf][msg.sender];
+        if (_allowance != type(uint256).max) allowance[onBehalf][msg.sender] = _allowance - shares;
+    }
+
+    deleteShares(onBehalf, shares);
+    _totalAssets -= assets.toUint128();
+    SafeERC20Lib.safeTransfer(asset, receiver, assets);
+    emit EventsLib.Withdraw(msg.sender, receiver, onBehalf, assets, shares);
+}
+```
+
+<Steps>
+  <Step title="Check idle assets">
+    Vault checks if idle assets can cover the withdrawal
+  </Step>
+  
+  <Step title="Deallocate if needed">
+    If insufficient idle assets, deallocate from liquidity adapter
+  </Step>
+  
+  <Step title="Burn shares and transfer">
+    Burn user shares and transfer assets to receiver
+  </Step>
+</Steps>
+
+### Withdrawal priority
+
+1. **First:** Use idle assets up to the withdrawal amount
+2. **Second:** Deallocate remaining amount from liquidity adapter (if set)
+3. **Last resort:** User must use `forceDeallocate` if liquidity adapter insufficient
+
+## Force deallocation
+
+The permissionless `forceDeallocate` function allows anyone to withdraw from any adapter:
+
+```solidity
+function forceDeallocate(address adapter, bytes memory data, uint256 assets, address onBehalf)
+    external
+    returns (uint256)
+{
+    bytes32[] memory ids = deallocateInternal(adapter, data, assets);
+    uint256 penaltyAssets = assets.mulDivUp(forceDeallocatePenalty[adapter], WAD);
+    uint256 penaltyShares = withdraw(penaltyAssets, address(this), onBehalf);
+    emit EventsLib.ForceDeallocate(msg.sender, adapter, assets, onBehalf, ids, penaltyAssets);
+    return penaltyShares;
+}
+```
+
+### How force deallocation works
+
+<Steps>
+  <Step title="Deallocate from adapter">
+    Assets are moved from adapter to vault's idle balance
+  </Step>
+  
+  <Step title="Calculate penalty">
+    Penalty is calculated based on adapter's `forceDeallocatePenalty`
+  </Step>
+  
+  <Step title="Withdraw penalty">
+    Penalty shares are withdrawn from user and sent to vault
+  </Step>
+</Steps>
+
+### Force deallocate penalties
+
+Curator sets penalties per adapter (capped at 2%):
+
+```solidity
+function setForceDeallocatePenalty(address adapter, uint256 newForceDeallocatePenalty) external {
+    timelocked();
+    require(newForceDeallocatePenalty <= MAX_FORCE_DEALLOCATE_PENALTY, ErrorsLib.PenaltyTooHigh());
+    forceDeallocatePenalty[adapter] = newForceDeallocatePenalty;
+    emit EventsLib.SetForceDeallocatePenalty(adapter, newForceDeallocatePenalty);
+}
+```
+
+<Info>
+`MAX_FORCE_DEALLOCATE_PENALTY` is capped at 2% to prevent excessive penalties while still discouraging allocation manipulation.
+</Info>
+
+### Penalty mechanics
+
+```solidity
+// Penalty calculation
+uint256 penaltyAssets = assets.mulDivUp(forceDeallocatePenalty[adapter], WAD);
+uint256 penaltyShares = withdraw(penaltyAssets, address(this), onBehalf);
+```
+
+The penalty:
+- Is taken as a withdrawal from `onBehalf`
+- Returns assets to the vault (increasing share price for remaining users)
+- Doesn't change total assets significantly (only rounding effects)
+- Discourages manipulation of relative caps
+
+<Note>
+The only friction to deallocating an adapter with a 0% penalty is the associated gas cost.
+</Note>
+
+## In-kind redemptions
+
+In-kind redemption allows users to exit with underlying market positions instead of assets:
+
+### Strategy for in-kind redemption
+
+<Steps>
+  <Step title="Flashloan liquidity">
+    Borrow assets via flashloan
+  </Step>
+  
+  <Step title="Supply to adapter's market">
+    Supply assets directly to the underlying market
+  </Step>
+  
+  <Step title="Force deallocate">
+    Call `forceDeallocate` to withdraw the supplied liquidity
+  </Step>
+  
+  <Step title="Repay flashloan">
+    Repay flashloan with deallocated assets
+  </Step>
+</Steps>
+
+<Info>
+In-kind redemptions allow exiting the vault even when no underlying markets are liquid, as long as the user can accept the market position directly.
+</Info>
+
+### Optimal force deallocate amount
+
+If a user has `A` assets in the vault and the vault is fully illiquid:
+
+```solidity
+optimalAmount = min(
+    liquidity_of_market,
+    A / (1 + penalty)
+)
+```
+
+This ensures either:
+- The market is emptied, or
+- The user exits completely with no shares or liquidity remaining
+
+## Liquidity management best practices
+
+### For allocators
+
+<Steps>
+  <Step title="Set appropriate liquidity adapter">
+    Choose a highly liquid market (e.g., large Morpho Market V1)
+  </Step>
+  
+  <Step title="Monitor withdrawal patterns">
+    Adjust idle assets based on typical withdrawal sizes
+  </Step>
+  
+  <Step title="Maintain liquidity buffer">
+    Ensure liquidity adapter has sufficient depth for expected withdrawals
+  </Step>
+  
+  <Step title="Balance yield and liquidity">
+    Higher idle assets = lower yield but better UX
+  </Step>
+</Steps>
+
+### Liquidity adapter selection
+
+A typical liquidity adapter should:
+- Have deep liquidity
+- Have low or zero force deallocate penalty
+- Support instant withdrawals
+- Minimize entry/exit losses
+
+**Example:** A very liquid Morpho Market V1 with:
+- High total supply
+- Low utilization
+- Trusted oracle and collateral
+- Adaptive curve IRM for predictable rates
+
+## Liquidity failures
+
+What happens if all liquidity sources are exhausted:
+
+<Warning>
+**Scenario:** User wants to withdraw but:
+1. Idle assets = 0
+2. Liquidity adapter exhausted or not set
+3. Other adapters illiquid
+
+**Options:**
+1. Wait for liquidity to be added by allocator
+2. Use `forceDeallocate` with penalty (if markets have any liquidity)
+3. Execute in-kind redemption via flashloan
+4. Wait for other users to deposit
+</Warning>
+
+<Info>
+Non-custodial guarantees ensure users can always exit via `forceDeallocate` and in-kind redemptions, even if it requires paying penalties or accepting market positions.
+</Info>
+
+## Monitoring liquidity health
+
+Key metrics to monitor:
+
+```solidity
+// Idle liquidity
+uint256 idle = IERC20(asset).balanceOf(address(vault));
+
+// Liquidity adapter depth (if set)
+if (vault.liquidityAdapter() != address(0)) {
+    uint256 adapterLiquidity = IAdapter(vault.liquidityAdapter()).realAssets();
+}
+
+// Total vault liquidity (idle + liquidity adapter)
+uint256 totalLiquidity = idle + adapterLiquidity;
+
+// Liquidity ratio
+uint256 liquidityRatio = totalLiquidity * 1e18 / vault.totalAssets();
+```
+
+Recommended liquidity ratio depends on:
+- Vault size and user base
+- Historical withdrawal patterns
+- Yield differential between liquid and illiquid markets
+- Depositor sophistication

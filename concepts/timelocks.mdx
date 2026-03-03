@@ -1,0 +1,313 @@
+---
+title: Timelock mechanism
+description: How timelocks protect depositors through submit-execute workflow and abdication in Morpho Vault V2
+---
+
+Curator configuration changes in Morpho Vault V2 are timelockable, requiring a two-step submit-execute process. This provides depositors time to exit before critical changes take effect, ensuring non-custodial guarantees.
+
+## Timelock overview
+
+Timelocks create a delay between proposing and executing configuration changes:
+
+<Steps>
+  <Step title="Submit">
+    Curator proposes a change by submitting the transaction data
+  </Step>
+  
+  <Step title="Wait">
+    Timelock period elapses (configurable per function)
+  </Step>
+  
+  <Step title="Execute">
+    Anyone can execute the pending change after timelock expires
+  </Step>
+</Steps>
+
+## Timelock storage
+
+```solidity
+mapping(bytes4 selector => uint256) public timelock;
+mapping(bytes4 selector => bool) public abdicated;
+mapping(bytes data => uint256) public executableAt;
+```
+
+- `timelock[selector]`: Duration in seconds for each function
+- `abdicated[selector]`: Whether a function has been permanently disabled
+- `executableAt[data]`: Timestamp when specific data becomes executable
+
+## Submit process
+
+The curator submits proposed changes:
+
+```solidity
+function submit(bytes calldata data) external {
+    require(msg.sender == curator, ErrorsLib.Unauthorized());
+    require(executableAt[data] == 0, ErrorsLib.DataAlreadyPending());
+
+    bytes4 selector = bytes4(data);
+    uint256 _timelock = selector == IVaultV2.decreaseTimelock.selector
+        ? timelock[bytes4(data[4:8])]
+        : timelock[selector];
+    executableAt[data] = block.timestamp + _timelock;
+    emit EventsLib.Submit(selector, data, executableAt[data]);
+}
+```
+
+<Info>
+The timelock duration for `decreaseTimelock` is the timelock of the function being decreased. For example, `decreaseTimelock(addAdapter, ...)` is timelocked by `timelock[addAdapter]`.
+</Info>
+
+### Example submission
+
+```solidity
+// Curator wants to add an adapter
+bytes memory data = abi.encodeWithSelector(
+    IVaultV2.addAdapter.selector,
+    adapterAddress
+);
+
+// Submit the proposal
+vault.submit(data);
+
+// executableAt[data] = block.timestamp + timelock[addAdapter.selector]
+```
+
+## Execute process
+
+After the timelock expires, anyone can execute:
+
+```solidity
+function timelocked() internal {
+    bytes4 selector = bytes4(msg.data);
+    require(executableAt[msg.data] != 0, ErrorsLib.DataNotTimelocked());
+    require(block.timestamp >= executableAt[msg.data], ErrorsLib.TimelockNotExpired());
+    require(!abdicated[selector], ErrorsLib.Abdicated());
+    executableAt[msg.data] = 0;
+    emit EventsLib.Accept(selector, msg.data);
+}
+```
+
+The `timelocked()` modifier is called at the start of timelocked functions:
+
+```solidity
+function addAdapter(address account) external {
+    timelocked();  // Checks and clears the timelock
+    require(
+        adapterRegistry == address(0) || IAdapterRegistry(adapterRegistry).isInRegistry(account),
+        ErrorsLib.NotInAdapterRegistry()
+    );
+    if (!isAdapter[account]) {
+        adapters.push(account);
+        isAdapter[account] = true;
+    }
+    emit EventsLib.AddAdapter(account);
+}
+```
+
+### Execution timeline
+
+```solidity
+// Minimum time a function can be called:
+min(
+    block.timestamp + timelock[selector],
+    executableAt[selector::_],
+    executableAt[decreaseTimelock::selector::newTimelock] + newTimelock
+)
+```
+
+## Revoke pending changes
+
+Curator or sentinels can cancel pending changes:
+
+```solidity
+function revoke(bytes calldata data) external {
+    require(msg.sender == curator || isSentinel[msg.sender], ErrorsLib.Unauthorized());
+    require(executableAt[data] != 0, ErrorsLib.DataNotTimelocked());
+    executableAt[data] = 0;
+    bytes4 selector = bytes4(data);
+    emit EventsLib.Revoke(msg.sender, selector, data);
+}
+```
+
+<Note>
+Sentinels can revoke pending changes to quickly derisk the vault in emergency situations.
+</Note>
+
+## Timelock management
+
+### Increase timelock
+
+```solidity
+function increaseTimelock(bytes4 selector, uint256 newDuration) external {
+    timelocked();
+    require(selector != IVaultV2.decreaseTimelock.selector, ErrorsLib.AutomaticallyTimelocked());
+    require(newDuration >= timelock[selector], ErrorsLib.TimelockNotIncreasing());
+
+    timelock[selector] = newDuration;
+    emit EventsLib.IncreaseTimelock(selector, newDuration);
+}
+```
+
+<Warning>
+This function requires great caution because it can irreversibly disable submit for a selector if set to a very high value. Existing pending operations submitted before increasing a timelock can still be executed at the initial `executableAt`.
+</Warning>
+
+### Decrease timelock
+
+```solidity
+function decreaseTimelock(bytes4 selector, uint256 newDuration) external {
+    timelocked();
+    require(selector != IVaultV2.decreaseTimelock.selector, ErrorsLib.AutomaticallyTimelocked());
+    require(newDuration <= timelock[selector], ErrorsLib.TimelockNotDecreasing());
+
+    timelock[selector] = newDuration;
+    emit EventsLib.DecreaseTimelock(selector, newDuration);
+}
+```
+
+Decreasing a timelock is itself timelocked by the current timelock of that function:
+
+```solidity
+// To decrease timelock for addAdapter:
+// 1. Submit decrease proposal
+bytes memory data = abi.encodeWithSelector(
+    IVaultV2.decreaseTimelock.selector,
+    IVaultV2.addAdapter.selector,
+    newDuration
+);
+vault.submit(data);
+
+// 2. Wait for timelock[addAdapter] seconds
+// 3. Execute the decrease
+vault.decreaseTimelock(IVaultV2.addAdapter.selector, newDuration);
+```
+
+## Abdication
+
+Abdication permanently disables a function:
+
+```solidity
+function abdicate(bytes4 selector) external {
+    timelocked();
+    abdicated[selector] = true;
+    emit EventsLib.Abdicate(selector);
+}
+```
+
+### Abdication effects
+
+<Warning>
+When a function is abdicated:
+- It cannot be called anymore, regardless of timelock settings
+- Pending submissions for that function cannot be executed
+- The abdication is permanent and irreversible
+- Submissions and timelock changes can still be made, but have no effect
+</Warning>
+
+### Use cases for abdication
+
+Abdication is useful when committing to never change certain parameters:
+
+```solidity
+// Permanently prevent adding new adapters
+vault.submit(abi.encodeWithSelector(
+    IVaultV2.abdicate.selector,
+    IVaultV2.addAdapter.selector
+));
+
+// After timelock...
+vault.abdicate(IVaultV2.addAdapter.selector);
+// Now addAdapter can never be called
+```
+
+<Info>
+When abdicated alongside an adapter registry, this ensures the vault will forever only use adapters authorized by that registry.
+</Info>
+
+## Functions exempt from timelocks
+
+Two curator functions are **not** timelockable:
+
+1. **decreaseAbsoluteCap** - Can be called immediately
+2. **decreaseRelativeCap** - Can be called immediately
+
+```solidity
+function decreaseAbsoluteCap(bytes memory idData, uint256 newAbsoluteCap) external {
+    bytes32 id = keccak256(idData);
+    require(msg.sender == curator || isSentinel[msg.sender], ErrorsLib.Unauthorized());
+    require(newAbsoluteCap <= caps[id].absoluteCap, ErrorsLib.AbsoluteCapNotDecreasing());
+    caps[id].absoluteCap = uint128(newAbsoluteCap);
+    emit EventsLib.DecreaseAbsoluteCap(msg.sender, id, idData, newAbsoluteCap);
+}
+```
+
+This allows rapid derisking by reducing exposure limits.
+
+## Non-custodial guarantees
+
+Timelocks ensure users can always exit before critical changes:
+
+<Steps>
+  <Step title="Configuration change submitted">
+    Curator submits a change (e.g., adding risky adapter)
+  </Step>
+  
+  <Step title="Users notified">
+    Users monitor pending changes via events or off-chain infrastructure
+  </Step>
+  
+  <Step title="Users exit if desired">
+    Users can withdraw before change executes (via normal withdrawal or in-kind redemption)
+  </Step>
+  
+  <Step title="Change executes">
+    After timelock, change takes effect (remaining users accept new configuration)
+  </Step>
+</Steps>
+
+<Info>
+Non-custodial guarantees come from the combination of timelocks and in-kind redemptions via `forceDeallocate`, ensuring users can always withdraw before changes take effect.
+</Info>
+
+## Timelock data validation
+
+<Warning>
+Nothing is checked on timelocked data, so it could be:
+- Not executable (function doesn't exist, wrong encoding)
+- Invalid (function conditions not met)
+- Conflicting (e.g., both `increaseTimelock` and `decreaseTimelock` for same selector)
+
+The curator is responsible for submitting valid data.
+</Warning>
+
+## Best practices
+
+### Setting up a new vault
+
+<Steps>
+  <Step title="Deploy with zero timelocks">
+    All timelocks start at zero for quick initial setup
+  </Step>
+  
+  <Step title="Configure initial parameters">
+    Add adapters, set caps, configure gates (executed immediately)
+  </Step>
+  
+  <Step title="Increase timelocks">
+    Set appropriate timelocks for each function to provide user protection
+  </Step>
+  
+  <Step title="Consider abdication">
+    Abdicate functions that should never change (e.g., adapter registry)
+  </Step>
+</Steps>
+
+### Recommended timelock durations
+
+- **Critical functions** (addAdapter, setAdapterRegistry): 7-14 days
+- **Moderate functions** (increaseAbsoluteCap, fees): 3-7 days
+- **Low-risk functions** (setIsAllocator): 1-3 days
+
+<Note>
+Timelock durations should balance user protection with operational flexibility. Longer timelocks provide more security but reduce adaptability.
+</Note>

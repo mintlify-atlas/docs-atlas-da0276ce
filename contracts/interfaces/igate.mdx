@@ -1,0 +1,104 @@
+---
+title: IGate interfaces
+description: Interfaces for access control gates that restrict share and asset transfers
+---
+
+# IGate interfaces
+
+Gate interfaces provide access control for vault share and asset transfers. Each gate type controls a specific transfer direction.
+
+## IReceiveSharesGate
+
+Controls who can receive vault shares.
+
+```solidity
+interface IReceiveSharesGate
+```
+
+### canReceiveShares
+
+```solidity
+function canReceiveShares(address account) external view returns (bool);
+```
+
+Checks if an account is allowed to receive vault shares.
+
+<ParamField name="account" type="address">
+  The address to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account can receive shares, false otherwise
+</ResponseField>
+
+## ISendSharesGate
+
+Controls who can send vault shares.
+
+```solidity
+interface ISendSharesGate
+```
+
+### canSendShares
+
+```solidity
+function canSendShares(address account) external view returns (bool);
+```
+
+Checks if an account is allowed to send vault shares.
+
+<ParamField name="account" type="address">
+  The address to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account can send shares, false otherwise
+</ResponseField>
+
+## IReceiveAssetsGate
+
+Controls who can deposit assets into the vault.
+
+```solidity
+interface IReceiveAssetsGate
+```
+
+### canReceiveAssets
+
+```solidity
+function canReceiveAssets(address account) external view returns (bool);
+```
+
+Checks if an account is allowed to deposit assets into the vault.
+
+<ParamField name="account" type="address">
+  The address to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account can deposit assets, false otherwise
+</ResponseField>
+
+## ISendAssetsGate
+
+Controls who can withdraw assets from the vault.
+
+```solidity
+interface ISendAssetsGate
+```
+
+### canSendAssets
+
+```solidity
+function canSendAssets(address account) external view returns (bool);
+```
+
+Checks if an account is allowed to withdraw assets from the vault.
+
+<ParamField name="account" type="address">
+  The address to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account can withdraw assets, false otherwise
+</ResponseField>

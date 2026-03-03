@@ -1,0 +1,184 @@
+---
+title: Asset allocation to markets
+description: Learn how to allocate and deallocate assets to markets in Morpho Vault V2
+---
+
+## Overview
+
+Morpho Vault V2 allows allocators to move assets between markets within boundaries set by caps. Allocation operations enable efficient capital deployment while maintaining risk controls through absolute and relative caps.
+
+## Allocation mechanism
+
+Allocators can distribute vault assets to different markets through adapters. Each market is identified by one or more IDs that track allocations and enforce caps.
+
+<Note>
+Only accounts with the allocator role can call `allocate()` and `deallocate()` functions. Sentinels can also deallocate assets.
+</Note>
+
+## Allocating assets
+
+The `allocate()` function moves assets from the vault to an adapter representing a market:
+
+```solidity
+function allocate(address adapter, bytes memory data, uint256 assets) external;
+```
+
+### Allocation process
+
+<Steps>
+  <Step title="Accrue interest">
+    The vault first accrues any pending interest to update total assets and allocations.
+  </Step>
+  
+  <Step title="Transfer assets">
+    Assets are transferred from the vault to the specified adapter.
+  </Step>
+  
+  <Step title="Update allocations">
+    The adapter returns IDs and the change in allocation, which updates tracked allocations.
+  </Step>
+  
+  <Step title="Check caps">
+    The vault verifies that absolute and relative caps are not exceeded for each ID.
+  </Step>
+</Steps>
+
+### Example allocation
+
+```solidity
+// Allocate 1000 assets to an adapter
+vault.allocate(adapterAddress, "", 1000);
+```
+
+### Cap enforcement
+
+Allocations are subject to two types of caps:
+
+- **Absolute cap**: Maximum total assets that can be allocated to an ID (in asset units)
+- **Relative cap**: Maximum allocation as a fraction of total vault assets (in WAD, where 1e18 = 100%)
+
+<Warning>
+Allocations will revert if:
+- The absolute cap is zero (prevents interaction with unknown markets)
+- The allocation would exceed the absolute cap
+- The allocation would exceed the relative cap (unless relative cap is WAD)
+</Warning>
+
+Source: `VaultV2.sol:575-600`
+
+## Deallocating assets
+
+The `deallocate()` function withdraws assets from an adapter back to the vault:
+
+```solidity
+function deallocate(address adapter, bytes memory data, uint256 assets) external;
+```
+
+### Deallocation process
+
+<Steps>
+  <Step title="Call adapter">
+    The adapter's `deallocate()` function is called with the specified data and asset amount.
+  </Step>
+  
+  <Step title="Update allocations">
+    Allocations are decreased based on the IDs and change returned by the adapter.
+  </Step>
+  
+  <Step title="Transfer assets">
+    Assets are transferred from the adapter back to the vault.
+  </Step>
+</Steps>
+
+### Example deallocation
+
+```solidity
+// Deallocate 500 assets from an adapter
+vault.deallocate(adapterAddress, "", 500);
+```
+
+<Warning>
+Deallocations will revert if:
+- The ID's current allocation is zero
+- The caller is not an allocator or sentinel
+- The adapter is not registered with the vault
+</Warning>
+
+Source: `VaultV2.sol:602-624`
+
+## Allocation tracking
+
+Allocations are tracked per ID using the `Caps` struct:
+
+```solidity
+struct Caps {
+    uint256 allocation;      // Current allocated amount
+    uint128 absoluteCap;     // Maximum absolute allocation
+    uint128 relativeCap;     // Maximum relative allocation (in WAD)
+}
+```
+
+### Viewing allocations
+
+```solidity
+// Get current allocation for an ID
+uint256 currentAllocation = vault.allocation(idHash);
+
+// Get absolute cap
+uint256 absCap = vault.absoluteCap(idHash);
+
+// Get relative cap
+uint256 relCap = vault.relativeCap(idHash);
+```
+
+## Interest and losses
+
+<Info>
+Allocations are updated when interacting with markets to account for accrued interest or realized losses. The change value returned by adapters includes both the intended allocation change and any interest or losses.
+</Info>
+
+### Allocation with interest
+
+When allocating to a market that has accrued interest, the allocation increases by both the new assets and the interest:
+
+```solidity
+// If a market has 1000 allocated with 100 interest accrued
+// Allocating 200 more will increase allocation by 300 (200 + 100)
+vault.allocate(adapter, "", 200);
+// allocation = 1300
+```
+
+Source: `AllocateTest.sol:225-269`
+
+## Relative cap protection
+
+Relative caps use `firstTotalAssets` rather than real-time total assets to prevent flashloan-based cap manipulation:
+
+<Warning>
+Depositing and allocating in the same transaction may fail relative cap checks. This is intentional protection against attackers using flashloans to bypass caps.
+</Warning>
+
+```solidity
+// This will revert if done in one transaction via multicall
+vault.deposit(1000, user);
+vault.allocate(adapter, "", 1000);  // May exceed relative cap
+
+// Instead, do this across separate transactions
+// Transaction 1:
+vault.deposit(1000, user);
+
+// Transaction 2:
+vault.allocate(adapter, "", 1000);  // Will succeed
+```
+
+Source: `AllocateTest.sol:120-149`
+
+## Access control
+
+- **Allocators**: Can call both `allocate()` and `deallocate()`
+- **Sentinels**: Can only call `deallocate()` (emergency withdrawals)
+- **Others**: Cannot call these functions
+
+Allocators are set by the curator through timelocked governance.
+
+Source: `VaultV2.sol:575, 602`

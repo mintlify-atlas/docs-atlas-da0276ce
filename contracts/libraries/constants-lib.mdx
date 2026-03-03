@@ -1,0 +1,109 @@
+---
+title: ConstantsLib
+description: Library of constant values used throughout Morpho Vault V2
+---
+
+The `ConstantsLib` library defines important constant values used across the Morpho Vault V2 system.
+
+## Constants
+
+### WAD
+
+```solidity
+uint256 constant WAD = 1e18;
+```
+
+The WAD (Wad) constant represents 1 with 18 decimal places (1e18). This is the standard unit for fixed-point arithmetic in the vault system.
+
+**Value:** `1000000000000000000` (10^18)
+
+---
+
+### DOMAIN_TYPEHASH
+
+```solidity
+bytes32 constant DOMAIN_TYPEHASH = keccak256("EIP712Domain(uint256 chainId,address verifyingContract)");
+```
+
+The EIP-712 domain separator typehash used for signature verification.
+
+**Value:** `keccak256("EIP712Domain(uint256 chainId,address verifyingContract)")`
+
+---
+
+### PERMIT_TYPEHASH
+
+```solidity
+bytes32 constant PERMIT_TYPEHASH = keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
+```
+
+The EIP-712 permit typehash used for gasless approvals.
+
+**Value:** `keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")`
+
+---
+
+### MAX_MAX_RATE
+
+```solidity
+uint256 constant MAX_MAX_RATE = 200e16 / uint256(365 days);
+```
+
+The maximum allowed maximum rate, equivalent to 200% APR.
+
+**Value:** `200e16 / 365 days` (approximately 6.34195839675291 × 10^13 per second)
+
+---
+
+### MAX_PERFORMANCE_FEE
+
+```solidity
+uint256 constant MAX_PERFORMANCE_FEE = 0.5e18;
+```
+
+The maximum performance fee that can be charged, set at 50%.
+
+**Value:** `0.5e18` (500000000000000000)
+
+---
+
+### MAX_MANAGEMENT_FEE
+
+```solidity
+uint256 constant MAX_MANAGEMENT_FEE = 0.05e18 / uint256(365 days);
+```
+
+The maximum management fee that can be charged, equivalent to 5% per year.
+
+**Value:** `0.05e18 / 365 days` (approximately 1.585489599188229 × 10^12 per second)
+
+---
+
+### MAX_FORCE_DEALLOCATE_PENALTY
+
+```solidity
+uint256 constant MAX_FORCE_DEALLOCATE_PENALTY = 0.02e18;
+```
+
+The maximum penalty that can be applied when force deallocating, set at 2%.
+
+**Value:** `0.02e18` (20000000000000000)
+
+---
+
+## Source code
+
+```solidity
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (c) 2025 Morpho Association
+pragma solidity ^0.8.0;
+
+uint256 constant WAD = 1e18;
+bytes32 constant DOMAIN_TYPEHASH = keccak256("EIP712Domain(uint256 chainId,address verifyingContract)");
+bytes32 constant PERMIT_TYPEHASH =
+    keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
+uint256 constant MAX_MAX_RATE = 200e16 / uint256(365 days); // 200% APR
+uint256 constant MAX_PERFORMANCE_FEE = 0.5e18; // 50%
+uint256 constant MAX_MANAGEMENT_FEE = 0.05e18 / uint256(365 days); // 5%
+uint256 constant MAX_FORCE_DEALLOCATE_PENALTY = 0.02e18; // 2%
+```

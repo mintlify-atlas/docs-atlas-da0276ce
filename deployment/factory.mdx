@@ -1,0 +1,226 @@
+---
+title: VaultV2Factory contract
+description: Deploy and manage Morpho Vault V2 instances using the factory contract
+---
+
+The `VaultV2Factory` contract provides a deterministic deployment mechanism for creating Morpho Vault V2 instances. It uses CREATE2 for predictable vault addresses and maintains a registry of all deployed vaults.
+
+## Contract overview
+
+The factory contract handles vault deployment and provides lookup functionality to verify vault authenticity and retrieve deployed vault addresses.
+
+### Key features
+
+- **Deterministic deployment**: Uses CREATE2 with salt for predictable vault addresses
+- **Vault registry**: Tracks all deployed vaults with `isVaultV2` mapping
+- **Address lookup**: Query deployed vault addresses by owner, asset, and salt
+- **Event emission**: Emits `CreateVaultV2` event for indexing and tracking
+
+## Factory deployment
+
+The `VaultV2Factory` contract is a simple, immutable factory with no constructor parameters:
+
+```solidity VaultV2Factory.sol
+contract VaultV2Factory is IVaultV2Factory {
+    mapping(address account => bool) public isVaultV2;
+    mapping(address owner => mapping(address asset => mapping(bytes32 salt => address))) public vaultV2;
+
+    function createVaultV2(address owner, address asset, bytes32 salt) external returns (address) {
+        address newVaultV2 = address(new VaultV2{salt: salt}(owner, asset));
+
+        isVaultV2[newVaultV2] = true;
+        vaultV2[owner][asset][salt] = newVaultV2;
+        emit CreateVaultV2(owner, asset, salt, newVaultV2);
+
+        return newVaultV2;
+    }
+}
+```
+
+## Creating vaults
+
+Use the `createVaultV2` function to deploy new vault instances:
+
+```solidity
+function createVaultV2(
+    address owner,
+    address asset,
+    bytes32 salt
+) external returns (address)
+```
+
+### Parameters
+
+<ParamField path="owner" type="address">
+  The initial owner of the vault who will have administrative control
+</ParamField>
+
+<ParamField path="asset" type="address">
+  The ERC20 token address that the vault will accept as deposits
+</ParamField>
+
+<ParamField path="salt" type="bytes32">
+  A unique salt value for CREATE2 deployment to generate deterministic addresses
+</ParamField>
+
+### Returns
+
+The address of the newly deployed `VaultV2` contract.
+
+## Verifying vaults
+
+The factory provides methods to verify vault authenticity and lookup deployed addresses:
+
+### Check if address is a factory-deployed vault
+
+```solidity
+bool isFactoryVault = factory.isVaultV2(vaultAddress);
+```
+
+### Lookup vault by parameters
+
+```solidity
+address vault = factory.vaultV2(owner, asset, salt);
+```
+
+If no vault exists with the given parameters, this returns `address(0)`.
+
+## Computing vault addresses
+
+You can predict the vault address before deployment using CREATE2 address calculation:
+
+```solidity
+bytes32 initCodeHash = keccak256(
+    abi.encodePacked(
+        type(VaultV2).creationCode,
+        abi.encode(owner, asset)
+    )
+);
+
+address predictedAddress = address(
+    uint160(
+        uint256(
+            keccak256(
+                abi.encodePacked(
+                    bytes1(0xff),
+                    address(factory),
+                    salt,
+                    initCodeHash
+                )
+            )
+        )
+    )
+);
+```
+
+<Note>
+The predicted address calculation must use the exact same parameters (owner, asset, salt) that will be passed to `createVaultV2`.
+</Note>
+
+## Events
+
+The factory emits the following event when a vault is created:
+
+```solidity
+event CreateVaultV2(
+    address indexed owner,
+    address indexed asset,
+    bytes32 salt,
+    address indexed newVaultV2
+);
+```
+
+This event allows you to:
+- Track all vault deployments
+- Index vaults by owner or asset
+- Monitor vault creation activity
+- Build off-chain registries of vaults
+
+## Example usage
+
+<CodeGroup>
+
+```solidity Foundry test
+function testDeployVault() public {
+    address owner = address(this);
+    address asset = address(usdc);
+    bytes32 salt = keccak256("my-vault-v1");
+
+    // Deploy vault through factory
+    address vault = factory.createVaultV2(owner, asset, salt);
+
+    // Verify deployment
+    assertTrue(factory.isVaultV2(vault));
+    assertEq(factory.vaultV2(owner, asset, salt), vault);
+
+    // Verify vault parameters
+    assertEq(VaultV2(vault).owner(), owner);
+    assertEq(VaultV2(vault).asset(), asset);
+}
+```
+
+```javascript Ethers v6
+const factory = new ethers.Contract(factoryAddress, factoryABI, signer);
+
+const owner = await signer.getAddress();
+const asset = "0x..." // USDC address
+const salt = ethers.keccak256(ethers.toUtf8Bytes("my-vault-v1"));
+
+// Deploy vault
+const tx = await factory.createVaultV2(owner, asset, salt);
+const receipt = await tx.wait();
+
+// Get vault address from event
+const event = receipt.logs.find(
+  log => log.fragment.name === 'CreateVaultV2'
+);
+const vaultAddress = event.args.newVaultV2;
+
+console.log("Vault deployed at:", vaultAddress);
+```
+
+```javascript Viem
+import { createPublicClient, createWalletClient } from 'viem';
+
+const walletClient = createWalletClient({ ... });
+const publicClient = createPublicClient({ ... });
+
+const owner = walletClient.account.address;
+const asset = '0x...'; // USDC address
+const salt = keccak256(toBytes('my-vault-v1'));
+
+// Deploy vault
+const hash = await walletClient.writeContract({
+  address: factoryAddress,
+  abi: factoryABI,
+  functionName: 'createVaultV2',
+  args: [owner, asset, salt],
+});
+
+const receipt = await publicClient.waitForTransactionReceipt({ hash });
+
+// Parse event to get vault address
+const log = receipt.logs.find(
+  log => log.topics[0] === createVaultV2EventTopic
+);
+const vaultAddress = `0x${log.topics[3].slice(26)}`;
+
+console.log('Vault deployed at:', vaultAddress);
+```
+
+</CodeGroup>
+
+<Warning>
+Each combination of (owner, asset, salt) can only be used once. Attempting to deploy with the same parameters will cause the transaction to revert.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Vault creation" icon="plus" href="/deployment/vault-creation">
+    Step-by-step guide to creating and initializing a vault
+  </Card>
+  <Card title="Configuration" icon="gear" href="/deployment/configuration">
+    Configure your vault with roles, fees, and parameters
+  </Card>
+</CardGroup>

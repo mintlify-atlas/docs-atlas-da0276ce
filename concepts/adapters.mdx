@@ -1,0 +1,277 @@
+---
+title: Adapters
+description: How Morpho Vault V2 uses adapters to allocate assets to underlying markets
+---
+
+Vaults allocate assets to underlying markets via separate contracts called adapters. Adapters hold positions on behalf of the vault and report the current value of investments.
+
+## Adapter interface
+
+All adapters must implement the `IAdapter` interface:
+
+```solidity
+interface IAdapter {
+    /// @dev Returns the market ids and the change in assets on this market
+    function allocate(bytes memory data, uint256 assets, bytes4 selector, address sender)
+        external
+        returns (bytes32[] memory ids, int256 change);
+
+    /// @dev Returns the market ids and the change in assets on this market
+    function deallocate(bytes memory data, uint256 assets, bytes4 selector, address sender)
+        external
+        returns (bytes32[] memory ids, int256 change);
+
+    /// @dev Returns the current value of the investments (in underlying asset)
+    function realAssets() external view returns (uint256 assets);
+}
+```
+
+## How adapters work
+
+### Allocation process
+
+When allocating assets to a market:
+
+<Steps>
+  <Step title="Transfer assets">
+    The vault transfers assets to the adapter
+  </Step>
+  
+  <Step title="Allocate to market">
+    The adapter calls `allocate()` to enter the underlying market
+  </Step>
+  
+  <Step title="Return IDs and change">
+    The adapter returns risk IDs and allocation change
+  </Step>
+  
+  <Step title="Check caps">
+    The vault validates that caps are not exceeded for returned IDs
+  </Step>
+</Steps>
+
+```solidity
+function allocateInternal(address adapter, bytes memory data, uint256 assets) internal {
+    require(isAdapter[adapter], ErrorsLib.NotAdapter());
+
+    accrueInterest();
+
+    SafeERC20Lib.safeTransfer(asset, adapter, assets);
+    (bytes32[] memory ids, int256 change) = IAdapter(adapter).allocate(data, assets, msg.sig, msg.sender);
+
+    for (uint256 i; i < ids.length; i++) {
+        Caps storage _caps = caps[ids[i]];
+        _caps.allocation = (int256(_caps.allocation) + change).toUint256();
+
+        require(_caps.absoluteCap > 0, ErrorsLib.ZeroAbsoluteCap());
+        require(_caps.allocation <= _caps.absoluteCap, ErrorsLib.AbsoluteCapExceeded());
+        require(
+            _caps.relativeCap == WAD || _caps.allocation <= firstTotalAssets.mulDivDown(_caps.relativeCap, WAD),
+            ErrorsLib.RelativeCapExceeded()
+        );
+    }
+    emit EventsLib.Allocate(msg.sender, adapter, assets, ids, change);
+}
+```
+
+### Deallocation process
+
+When deallocating from a market:
+
+<Steps>
+  <Step title="Deallocate from market">
+    The adapter calls `deallocate()` to exit the underlying market
+  </Step>
+  
+  <Step title="Update allocations">
+    The vault updates allocation tracking for returned IDs
+  </Step>
+  
+  <Step title="Transfer assets back">
+    The adapter transfers assets back to the vault
+  </Step>
+</Steps>
+
+```solidity
+function deallocateInternal(address adapter, bytes memory data, uint256 assets)
+    internal
+    returns (bytes32[] memory)
+{
+    require(isAdapter[adapter], ErrorsLib.NotAdapter());
+
+    (bytes32[] memory ids, int256 change) = IAdapter(adapter).deallocate(data, assets, msg.sig, msg.sender);
+
+    for (uint256 i; i < ids.length; i++) {
+        Caps storage _caps = caps[ids[i]];
+        require(_caps.allocation > 0, ErrorsLib.ZeroAllocation());
+        _caps.allocation = (int256(_caps.allocation) + change).toUint256();
+    }
+
+    SafeERC20Lib.safeTransferFrom(asset, adapter, address(this), assets);
+    emit EventsLib.Deallocate(msg.sender, adapter, assets, ids, change);
+    return ids;
+}
+```
+
+## Adapter specification
+
+Adapters must follow these requirements:
+
+<Warning>
+**Security requirements:**
+- Only the vault can call `allocate`/`deallocate`
+- Must not re-enter (directly or indirectly) the vault
+- Must enter/exit markets only in `allocate`/`deallocate` calls
+</Warning>
+
+**Functional requirements:**
+- Return correct IDs on `allocate`/`deallocate` (IDs must not repeat)
+- After `deallocate`, vault must have approval to transfer at least `assets` from the adapter
+- Make `deallocate` possible for in-kind redemptions
+- After updates, sum of changes must equal current estimated position
+
+**Rounding and fees:**
+- Adapters may lose small amounts due to rounding errors or entry/exit fees
+- Such losses should stay negligible compared to gas costs
+- Curators should not interact with markets that create significant entry/exit losses
+
+## Adapter registry
+
+An adapter registry constrains which adapters a vault can add:
+
+```solidity
+interface IAdapterRegistry {
+    function isInRegistry(address account) external view returns (bool);
+}
+```
+
+### Registry behavior
+
+- If `adapterRegistry` is `address(0)`, the vault can have any adapters
+- When set, the registry retroactively checks already added adapters
+- Useful when abdicated to ensure vault forever uses authorized adapters
+- Registry should be "add only" to maintain invariant that all vault adapters are in registry
+
+### Setting adapter registry
+
+```solidity
+function setAdapterRegistry(address newAdapterRegistry) external {
+    timelocked();
+
+    if (newAdapterRegistry != address(0)) {
+        for (uint256 i = 0; i < adapters.length; i++) {
+            require(
+                IAdapterRegistry(newAdapterRegistry).isInRegistry(adapters[i]),
+                ErrorsLib.NotInAdapterRegistry()
+            );
+        }
+    }
+
+    adapterRegistry = newAdapterRegistry;
+    emit EventsLib.SetAdapterRegistry(newAdapterRegistry);
+}
+```
+
+## Available adapters
+
+Morpho Vault V2 supports the following adapters:
+
+### Morpho Market V1 Adapter V2
+
+**Purpose:** Allocates to Morpho Blue markets (also known as Morpho Market V1)
+
+**Key features:**
+- Only works with markets using the adaptive curve IRM
+- Tracks multiple market positions via `marketIds` array
+- Has its own timelock system for curator functions
+- Supports burning shares for loss realization
+
+**IDs returned:**
+```solidity
+function ids(MarketParams memory marketParams) public view returns (bytes32[] memory) {
+    bytes32[] memory ids_ = new bytes32[](3);
+    ids_[0] = adapterId; // keccak256(abi.encode("this", address(this)))
+    ids_[1] = keccak256(abi.encode("collateralToken", marketParams.collateralToken));
+    ids_[2] = keccak256(abi.encode("this/marketParams", address(this), marketParams));
+    return ids_;
+}
+```
+
+<Note>
+This adapter must be used with Morpho markets protected against inflation attacks with an initial supply.
+</Note>
+
+### Morpho Vault V1 Adapter
+
+**Purpose:** Allocates to Morpho Vaults V1 (MetaMorpho V1.0 and V1.1)
+
+**Key features:**
+- Simpler design than Market V1 adapter
+- Returns single ID (adapter ID)
+- Uses ERC-4626 `deposit`/`withdraw` interface
+- Cannot skim MetaMorpho vault shares (only other tokens)
+
+**IDs returned:**
+```solidity
+function ids() public view returns (bytes32[] memory) {
+    bytes32[] memory ids_ = new bytes32[](1);
+    ids_[0] = adapterId; // keccak256(abi.encode("this", address(this)))
+    return ids_;
+}
+```
+
+<Warning>
+Morpho Vaults V1.1 do not realize bad debt, so Morpho Vaults V2 supplying in them will not realize corresponding bad debt.
+</Warning>
+
+## Adding and removing adapters
+
+### Adding an adapter
+
+```solidity
+function addAdapter(address account) external {
+    timelocked();
+    require(
+        adapterRegistry == address(0) || IAdapterRegistry(adapterRegistry).isInRegistry(account),
+        ErrorsLib.NotInAdapterRegistry()
+    );
+    if (!isAdapter[account]) {
+        adapters.push(account);
+        isAdapter[account] = true;
+    }
+    emit EventsLib.AddAdapter(account);
+}
+```
+
+### Removing an adapter
+
+```solidity
+function removeAdapter(address account) external {
+    timelocked();
+    if (isAdapter[account]) {
+        for (uint256 i = 0; i < adapters.length; i++) {
+            if (adapters[i] == account) {
+                adapters[i] = adapters[adapters.length - 1];
+                adapters.pop();
+                break;
+            }
+        }
+        isAdapter[account] = false;
+    }
+    emit EventsLib.RemoveAdapter(account);
+}
+```
+
+<Info>
+Adapters should be removed only if they have no assets. To ensure no allocator can allocate during removal, set an exclusive ID cap to zero.
+</Info>
+
+## ID-based risk tracking
+
+Adapters return IDs that represent common risk factors:
+
+- **Adapter ID:** Unique to the adapter instance
+- **Collateral token ID:** Shared across markets with same collateral
+- **Market-specific ID:** Unique to a specific market configuration
+
+IDs can be reused across multiple markets to cap total exposure to a common risk factor (e.g., a specific collateral type, oracle, or protocol).

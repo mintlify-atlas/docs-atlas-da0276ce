@@ -1,0 +1,920 @@
+---
+title: EventsLib
+description: Library of event definitions for Morpho Vault V2
+---
+
+The `EventsLib` library defines all events emitted by the Morpho Vault V2 system.
+
+## ERC20 events
+
+### Approval
+
+```solidity
+event Approval(address indexed owner, address indexed spender, uint256 shares);
+```
+
+Emitted when an approval is set.
+
+<ParamField path="owner" type="address">
+  The address granting the approval
+</ParamField>
+
+<ParamField path="spender" type="address">
+  The address receiving the approval
+</ParamField>
+
+<ParamField path="shares" type="uint256">
+  The amount of shares approved
+</ParamField>
+
+---
+
+### Transfer
+
+```solidity
+event Transfer(address indexed from, address indexed to, uint256 shares);
+```
+
+Emitted when shares are transferred.
+
+<ParamField path="from" type="address">
+  The address sending the shares
+</ParamField>
+
+<ParamField path="to" type="address">
+  The address receiving the shares
+</ParamField>
+
+<ParamField path="shares" type="uint256">
+  The amount of shares transferred
+</ParamField>
+
+---
+
+### AllowanceUpdatedByTransferFrom
+
+```solidity
+event AllowanceUpdatedByTransferFrom(address indexed owner, address indexed spender, uint256 shares);
+```
+
+Emitted when the allowance is updated by transferFrom (not when it is updated by permit, approve, withdraw, or redeem because their respective events allow tracking the allowance).
+
+<ParamField path="owner" type="address">
+  The address whose allowance is updated
+</ParamField>
+
+<ParamField path="spender" type="address">
+  The address spending the allowance
+</ParamField>
+
+<ParamField path="shares" type="uint256">
+  The new allowance amount
+</ParamField>
+
+---
+
+### Permit
+
+```solidity
+event Permit(address indexed owner, address indexed spender, uint256 shares, uint256 nonce, uint256 deadline);
+```
+
+Emitted when a permit is executed.
+
+<ParamField path="owner" type="address">
+  The address granting the permit
+</ParamField>
+
+<ParamField path="spender" type="address">
+  The address receiving the permit
+</ParamField>
+
+<ParamField path="shares" type="uint256">
+  The amount of shares approved
+</ParamField>
+
+<ParamField path="nonce" type="uint256">
+  The nonce used for the permit
+</ParamField>
+
+<ParamField path="deadline" type="uint256">
+  The deadline for the permit
+</ParamField>
+
+---
+
+## ERC4626 events
+
+### Deposit
+
+```solidity
+event Deposit(address indexed sender, address indexed onBehalf, uint256 assets, uint256 shares);
+```
+
+Emitted when assets are deposited.
+
+<ParamField path="sender" type="address">
+  The address initiating the deposit
+</ParamField>
+
+<ParamField path="onBehalf" type="address">
+  The address receiving the shares
+</ParamField>
+
+<ParamField path="assets" type="uint256">
+  The amount of assets deposited
+</ParamField>
+
+<ParamField path="shares" type="uint256">
+  The amount of shares minted
+</ParamField>
+
+---
+
+### Withdraw
+
+```solidity
+event Withdraw(
+    address indexed sender,
+    address indexed receiver,
+    address indexed onBehalf,
+    uint256 assets,
+    uint256 shares
+);
+```
+
+Emitted when assets are withdrawn.
+
+<ParamField path="sender" type="address">
+  The address initiating the withdrawal
+</ParamField>
+
+<ParamField path="receiver" type="address">
+  The address receiving the assets
+</ParamField>
+
+<ParamField path="onBehalf" type="address">
+  The address whose shares are burned
+</ParamField>
+
+<ParamField path="assets" type="uint256">
+  The amount of assets withdrawn
+</ParamField>
+
+<ParamField path="shares" type="uint256">
+  The amount of shares burned
+</ParamField>
+
+---
+
+## Vault creation events
+
+### Constructor
+
+```solidity
+event Constructor(address indexed owner, address indexed asset);
+```
+
+Emitted when the vault is created.
+
+<ParamField path="owner" type="address">
+  The initial owner of the vault
+</ParamField>
+
+<ParamField path="asset" type="address">
+  The asset token of the vault
+</ParamField>
+
+---
+
+## Allocation events
+
+### Allocate
+
+```solidity
+event Allocate(address indexed sender, address indexed adapter, uint256 assets, bytes32[] ids, int256 change);
+```
+
+Emitted when assets are allocated to an adapter.
+
+<ParamField path="sender" type="address">
+  The address initiating the allocation
+</ParamField>
+
+<ParamField path="adapter" type="address">
+  The adapter receiving the allocation
+</ParamField>
+
+<ParamField path="assets" type="uint256">
+  The amount of assets allocated
+</ParamField>
+
+<ParamField path="ids" type="bytes32[]">
+  The IDs affected by the allocation
+</ParamField>
+
+<ParamField path="change" type="int256">
+  The change in allocation
+</ParamField>
+
+---
+
+### Deallocate
+
+```solidity
+event Deallocate(address indexed sender, address indexed adapter, uint256 assets, bytes32[] ids, int256 change);
+```
+
+Emitted when assets are deallocated from an adapter.
+
+<ParamField path="sender" type="address">
+  The address initiating the deallocation
+</ParamField>
+
+<ParamField path="adapter" type="address">
+  The adapter being deallocated from
+</ParamField>
+
+<ParamField path="assets" type="uint256">
+  The amount of assets deallocated
+</ParamField>
+
+<ParamField path="ids" type="bytes32[]">
+  The IDs affected by the deallocation
+</ParamField>
+
+<ParamField path="change" type="int256">
+  The change in allocation
+</ParamField>
+
+---
+
+### ForceDeallocate
+
+```solidity
+event ForceDeallocate(
+    address indexed sender,
+    address adapter,
+    uint256 assets,
+    address indexed onBehalf,
+    bytes32[] ids,
+    uint256 penaltyAssets
+);
+```
+
+Emitted when assets are force deallocated.
+
+<ParamField path="sender" type="address">
+  The address initiating the force deallocation
+</ParamField>
+
+<ParamField path="adapter" type="address">
+  The adapter being force deallocated from
+</ParamField>
+
+<ParamField path="assets" type="uint256">
+  The amount of assets force deallocated
+</ParamField>
+
+<ParamField path="onBehalf" type="address">
+  The address on whose behalf the force deallocation is performed
+</ParamField>
+
+<ParamField path="ids" type="bytes32[]">
+  The IDs affected by the force deallocation
+</ParamField>
+
+<ParamField path="penaltyAssets" type="uint256">
+  The amount of penalty assets charged
+</ParamField>
+
+---
+
+## Fee and interest events
+
+### AccrueInterest
+
+```solidity
+event AccrueInterest(
+    uint256 previousTotalAssets,
+    uint256 newTotalAssets,
+    uint256 performanceFeeShares,
+    uint256 managementFeeShares
+);
+```
+
+Emitted when interest is accrued.
+
+<ParamField path="previousTotalAssets" type="uint256">
+  The total assets before accrual
+</ParamField>
+
+<ParamField path="newTotalAssets" type="uint256">
+  The total assets after accrual
+</ParamField>
+
+<ParamField path="performanceFeeShares" type="uint256">
+  The shares minted as performance fee
+</ParamField>
+
+<ParamField path="managementFeeShares" type="uint256">
+  The shares minted as management fee
+</ParamField>
+
+---
+
+## Timelock events
+
+### Revoke
+
+```solidity
+event Revoke(address indexed sender, bytes4 indexed selector, bytes data);
+```
+
+Emitted when a timelocked operation is revoked.
+
+<ParamField path="sender" type="address">
+  The address revoking the operation
+</ParamField>
+
+<ParamField path="selector" type="bytes4">
+  The function selector of the revoked operation
+</ParamField>
+
+<ParamField path="data" type="bytes">
+  The data of the revoked operation
+</ParamField>
+
+---
+
+### Submit
+
+```solidity
+event Submit(bytes4 indexed selector, bytes data, uint256 executableAt);
+```
+
+Emitted when a timelocked operation is submitted.
+
+<ParamField path="selector" type="bytes4">
+  The function selector of the submitted operation
+</ParamField>
+
+<ParamField path="data" type="bytes">
+  The data of the submitted operation
+</ParamField>
+
+<ParamField path="executableAt" type="uint256">
+  The timestamp when the operation becomes executable
+</ParamField>
+
+---
+
+### Accept
+
+```solidity
+event Accept(bytes4 indexed selector, bytes data);
+```
+
+Emitted when a timelocked operation is accepted and executed.
+
+<ParamField path="selector" type="bytes4">
+  The function selector of the accepted operation
+</ParamField>
+
+<ParamField path="data" type="bytes">
+  The data of the accepted operation
+</ParamField>
+
+---
+
+## Configuration events
+
+### SetOwner
+
+```solidity
+event SetOwner(address indexed newOwner);
+```
+
+Emitted when the owner is changed.
+
+<ParamField path="newOwner" type="address">
+  The new owner address
+</ParamField>
+
+---
+
+### SetCurator
+
+```solidity
+event SetCurator(address indexed newCurator);
+```
+
+Emitted when the curator is changed.
+
+<ParamField path="newCurator" type="address">
+  The new curator address
+</ParamField>
+
+---
+
+### SetIsSentinel
+
+```solidity
+event SetIsSentinel(address indexed account, bool newIsSentinel);
+```
+
+Emitted when an account's sentinel status is changed.
+
+<ParamField path="account" type="address">
+  The account whose sentinel status is changed
+</ParamField>
+
+<ParamField path="newIsSentinel" type="bool">
+  The new sentinel status
+</ParamField>
+
+---
+
+### SetName
+
+```solidity
+event SetName(string newName);
+```
+
+Emitted when the vault name is changed.
+
+<ParamField path="newName" type="string">
+  The new vault name
+</ParamField>
+
+---
+
+### SetSymbol
+
+```solidity
+event SetSymbol(string newSymbol);
+```
+
+Emitted when the vault symbol is changed.
+
+<ParamField path="newSymbol" type="string">
+  The new vault symbol
+</ParamField>
+
+---
+
+### SetIsAllocator
+
+```solidity
+event SetIsAllocator(address indexed account, bool newIsAllocator);
+```
+
+Emitted when an account's allocator status is changed.
+
+<ParamField path="account" type="address">
+  The account whose allocator status is changed
+</ParamField>
+
+<ParamField path="newIsAllocator" type="bool">
+  The new allocator status
+</ParamField>
+
+---
+
+### SetReceiveSharesGate
+
+```solidity
+event SetReceiveSharesGate(address indexed newReceiveSharesGate);
+```
+
+Emitted when the receive shares gate is changed.
+
+<ParamField path="newReceiveSharesGate" type="address">
+  The new receive shares gate address
+</ParamField>
+
+---
+
+### SetSendSharesGate
+
+```solidity
+event SetSendSharesGate(address indexed newSendSharesGate);
+```
+
+Emitted when the send shares gate is changed.
+
+<ParamField path="newSendSharesGate" type="address">
+  The new send shares gate address
+</ParamField>
+
+---
+
+### SetReceiveAssetsGate
+
+```solidity
+event SetReceiveAssetsGate(address indexed newReceiveAssetsGate);
+```
+
+Emitted when the receive assets gate is changed.
+
+<ParamField path="newReceiveAssetsGate" type="address">
+  The new receive assets gate address
+</ParamField>
+
+---
+
+### SetSendAssetsGate
+
+```solidity
+event SetSendAssetsGate(address indexed newSendAssetsGate);
+```
+
+Emitted when the send assets gate is changed.
+
+<ParamField path="newSendAssetsGate" type="address">
+  The new send assets gate address
+</ParamField>
+
+---
+
+### SetAdapterRegistry
+
+```solidity
+event SetAdapterRegistry(address indexed newAdapterRegistry);
+```
+
+Emitted when the adapter registry is changed.
+
+<ParamField path="newAdapterRegistry" type="address">
+  The new adapter registry address
+</ParamField>
+
+---
+
+### AddAdapter
+
+```solidity
+event AddAdapter(address indexed account);
+```
+
+Emitted when an adapter is added.
+
+<ParamField path="account" type="address">
+  The adapter address being added
+</ParamField>
+
+---
+
+### RemoveAdapter
+
+```solidity
+event RemoveAdapter(address indexed account);
+```
+
+Emitted when an adapter is removed.
+
+<ParamField path="account" type="address">
+  The adapter address being removed
+</ParamField>
+
+---
+
+### DecreaseTimelock
+
+```solidity
+event DecreaseTimelock(bytes4 indexed selector, uint256 newDuration);
+```
+
+Emitted when a timelock duration is decreased.
+
+<ParamField path="selector" type="bytes4">
+  The function selector whose timelock is decreased
+</ParamField>
+
+<ParamField path="newDuration" type="uint256">
+  The new timelock duration
+</ParamField>
+
+---
+
+### IncreaseTimelock
+
+```solidity
+event IncreaseTimelock(bytes4 indexed selector, uint256 newDuration);
+```
+
+Emitted when a timelock duration is increased.
+
+<ParamField path="selector" type="bytes4">
+  The function selector whose timelock is increased
+</ParamField>
+
+<ParamField path="newDuration" type="uint256">
+  The new timelock duration
+</ParamField>
+
+---
+
+### Abdicate
+
+```solidity
+event Abdicate(bytes4 indexed selector);
+```
+
+Emitted when a function is abdicated (permanently disabled).
+
+<ParamField path="selector" type="bytes4">
+  The function selector being abdicated
+</ParamField>
+
+---
+
+### SetLiquidityAdapterAndData
+
+```solidity
+event SetLiquidityAdapterAndData(
+    address indexed sender,
+    address indexed newLiquidityAdapter,
+    bytes indexed newLiquidityData
+);
+```
+
+Emitted when the liquidity adapter and data are changed.
+
+<ParamField path="sender" type="address">
+  The address initiating the change
+</ParamField>
+
+<ParamField path="newLiquidityAdapter" type="address">
+  The new liquidity adapter address
+</ParamField>
+
+<ParamField path="newLiquidityData" type="bytes">
+  The new liquidity data
+</ParamField>
+
+---
+
+### SetPerformanceFee
+
+```solidity
+event SetPerformanceFee(uint256 newPerformanceFee);
+```
+
+Emitted when the performance fee is changed.
+
+<ParamField path="newPerformanceFee" type="uint256">
+  The new performance fee
+</ParamField>
+
+---
+
+### SetPerformanceFeeRecipient
+
+```solidity
+event SetPerformanceFeeRecipient(address indexed newPerformanceFeeRecipient);
+```
+
+Emitted when the performance fee recipient is changed.
+
+<ParamField path="newPerformanceFeeRecipient" type="address">
+  The new performance fee recipient address
+</ParamField>
+
+---
+
+### SetManagementFee
+
+```solidity
+event SetManagementFee(uint256 newManagementFee);
+```
+
+Emitted when the management fee is changed.
+
+<ParamField path="newManagementFee" type="uint256">
+  The new management fee
+</ParamField>
+
+---
+
+### SetManagementFeeRecipient
+
+```solidity
+event SetManagementFeeRecipient(address indexed newManagementFeeRecipient);
+```
+
+Emitted when the management fee recipient is changed.
+
+<ParamField path="newManagementFeeRecipient" type="address">
+  The new management fee recipient address
+</ParamField>
+
+---
+
+### DecreaseAbsoluteCap
+
+```solidity
+event DecreaseAbsoluteCap(address indexed sender, bytes32 indexed id, bytes idData, uint256 newAbsoluteCap);
+```
+
+Emitted when an absolute cap is decreased.
+
+<ParamField path="sender" type="address">
+  The address initiating the decrease
+</ParamField>
+
+<ParamField path="id" type="bytes32">
+  The ID whose cap is decreased
+</ParamField>
+
+<ParamField path="idData" type="bytes">
+  The ID data
+</ParamField>
+
+<ParamField path="newAbsoluteCap" type="uint256">
+  The new absolute cap value
+</ParamField>
+
+---
+
+### IncreaseAbsoluteCap
+
+```solidity
+event IncreaseAbsoluteCap(bytes32 indexed id, bytes idData, uint256 newAbsoluteCap);
+```
+
+Emitted when an absolute cap is increased.
+
+<ParamField path="id" type="bytes32">
+  The ID whose cap is increased
+</ParamField>
+
+<ParamField path="idData" type="bytes">
+  The ID data
+</ParamField>
+
+<ParamField path="newAbsoluteCap" type="uint256">
+  The new absolute cap value
+</ParamField>
+
+---
+
+### DecreaseRelativeCap
+
+```solidity
+event DecreaseRelativeCap(address indexed sender, bytes32 indexed id, bytes idData, uint256 newRelativeCap);
+```
+
+Emitted when a relative cap is decreased.
+
+<ParamField path="sender" type="address">
+  The address initiating the decrease
+</ParamField>
+
+<ParamField path="id" type="bytes32">
+  The ID whose cap is decreased
+</ParamField>
+
+<ParamField path="idData" type="bytes">
+  The ID data
+</ParamField>
+
+<ParamField path="newRelativeCap" type="uint256">
+  The new relative cap value
+</ParamField>
+
+---
+
+### IncreaseRelativeCap
+
+```solidity
+event IncreaseRelativeCap(bytes32 indexed id, bytes idData, uint256 newRelativeCap);
+```
+
+Emitted when a relative cap is increased.
+
+<ParamField path="id" type="bytes32">
+  The ID whose cap is increased
+</ParamField>
+
+<ParamField path="idData" type="bytes">
+  The ID data
+</ParamField>
+
+<ParamField path="newRelativeCap" type="uint256">
+  The new relative cap value
+</ParamField>
+
+---
+
+### SetMaxRate
+
+```solidity
+event SetMaxRate(uint256 newMaxRate);
+```
+
+Emitted when the maximum rate is changed.
+
+<ParamField path="newMaxRate" type="uint256">
+  The new maximum rate
+</ParamField>
+
+---
+
+### SetForceDeallocatePenalty
+
+```solidity
+event SetForceDeallocatePenalty(address indexed adapter, uint256 forceDeallocatePenalty);
+```
+
+Emitted when the force deallocate penalty is changed.
+
+<ParamField path="adapter" type="address">
+  The adapter whose penalty is changed
+</ParamField>
+
+<ParamField path="forceDeallocatePenalty" type="uint256">
+  The new force deallocate penalty
+</ParamField>
+
+---
+
+## Source code
+
+```solidity
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (c) 2025 Morpho Association
+pragma solidity ^0.8.0;
+
+library EventsLib {
+    // ERC20 events
+    event Approval(address indexed owner, address indexed spender, uint256 shares);
+    event Transfer(address indexed from, address indexed to, uint256 shares);
+    /// @dev Emitted when the allowance is updated by transferFrom (not when it is updated by permit, approve, withdraw,
+    /// redeem because their respective events allow to track the allowance).
+    event AllowanceUpdatedByTransferFrom(address indexed owner, address indexed spender, uint256 shares);
+    event Permit(address indexed owner, address indexed spender, uint256 shares, uint256 nonce, uint256 deadline);
+
+    // ERC4626 events
+    event Deposit(address indexed sender, address indexed onBehalf, uint256 assets, uint256 shares);
+    event Withdraw(
+        address indexed sender, address indexed receiver, address indexed onBehalf, uint256 assets, uint256 shares
+    );
+
+    // Vault creation events
+    event Constructor(address indexed owner, address indexed asset);
+
+    // Allocation events
+    event Allocate(address indexed sender, address indexed adapter, uint256 assets, bytes32[] ids, int256 change);
+    event Deallocate(address indexed sender, address indexed adapter, uint256 assets, bytes32[] ids, int256 change);
+    event ForceDeallocate(
+        address indexed sender,
+        address adapter,
+        uint256 assets,
+        address indexed onBehalf,
+        bytes32[] ids,
+        uint256 penaltyAssets
+    );
+
+    // Fee and interest events
+    event AccrueInterest(
+        uint256 previousTotalAssets, uint256 newTotalAssets, uint256 performanceFeeShares, uint256 managementFeeShares
+    );
+
+    // Timelock events
+    event Revoke(address indexed sender, bytes4 indexed selector, bytes data);
+    event Submit(bytes4 indexed selector, bytes data, uint256 executableAt);
+    event Accept(bytes4 indexed selector, bytes data);
+
+    // Configuration events
+    event SetOwner(address indexed newOwner);
+    event SetCurator(address indexed newCurator);
+    event SetIsSentinel(address indexed account, bool newIsSentinel);
+    event SetName(string newName);
+    event SetSymbol(string newSymbol);
+    event SetIsAllocator(address indexed account, bool newIsAllocator);
+    event SetReceiveSharesGate(address indexed newReceiveSharesGate);
+    event SetSendSharesGate(address indexed newSendSharesGate);
+    event SetReceiveAssetsGate(address indexed newReceiveAssetsGate);
+    event SetSendAssetsGate(address indexed newSendAssetsGate);
+    event SetAdapterRegistry(address indexed newAdapterRegistry);
+    event AddAdapter(address indexed account);
+    event RemoveAdapter(address indexed account);
+    event DecreaseTimelock(bytes4 indexed selector, uint256 newDuration);
+    event IncreaseTimelock(bytes4 indexed selector, uint256 newDuration);
+    event Abdicate(bytes4 indexed selector);
+    event SetLiquidityAdapterAndData(
+        address indexed sender, address indexed newLiquidityAdapter, bytes indexed newLiquidityData
+    );
+    event SetPerformanceFee(uint256 newPerformanceFee);
+    event SetPerformanceFeeRecipient(address indexed newPerformanceFeeRecipient);
+    event SetManagementFee(uint256 newManagementFee);
+    event SetManagementFeeRecipient(address indexed newManagementFeeRecipient);
+    event DecreaseAbsoluteCap(address indexed sender, bytes32 indexed id, bytes idData, uint256 newAbsoluteCap);
+    event IncreaseAbsoluteCap(bytes32 indexed id, bytes idData, uint256 newAbsoluteCap);
+    event DecreaseRelativeCap(address indexed sender, bytes32 indexed id, bytes idData, uint256 newRelativeCap);
+    event IncreaseRelativeCap(bytes32 indexed id, bytes idData, uint256 newRelativeCap);
+    event SetMaxRate(uint256 newMaxRate);
+    event SetForceDeallocatePenalty(address indexed adapter, uint256 forceDeallocatePenalty);
+}
+```

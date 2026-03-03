@@ -1,0 +1,182 @@
+---
+title: MathLib
+description: Library of mathematical utility functions for Morpho Vault V2
+---
+
+The `MathLib` library provides gas-optimized mathematical utility functions used throughout the Morpho Vault V2 system.
+
+## Functions
+
+### mulDivDown
+
+```solidity
+function mulDivDown(uint256 x, uint256 y, uint256 d) internal pure returns (uint256)
+```
+
+Returns `(x * y) / d` rounded down.
+
+<ParamField path="x" type="uint256">
+  The first multiplicand
+</ParamField>
+
+<ParamField path="y" type="uint256">
+  The second multiplicand
+</ParamField>
+
+<ParamField path="d" type="uint256">
+  The divisor
+</ParamField>
+
+**Returns:** The result of `(x * y) / d` rounded down
+
+---
+
+### mulDivUp
+
+```solidity
+function mulDivUp(uint256 x, uint256 y, uint256 d) internal pure returns (uint256)
+```
+
+Returns `(x * y) / d` rounded up.
+
+<ParamField path="x" type="uint256">
+  The first multiplicand
+</ParamField>
+
+<ParamField path="y" type="uint256">
+  The second multiplicand
+</ParamField>
+
+<ParamField path="d" type="uint256">
+  The divisor
+</ParamField>
+
+**Returns:** The result of `(x * y) / d` rounded up
+
+---
+
+### zeroFloorSub
+
+```solidity
+function zeroFloorSub(uint256 x, uint256 y) internal pure returns (uint256 z)
+```
+
+Returns `max(0, x - y)`, preventing underflow by returning 0 if `y > x`.
+
+<ParamField path="x" type="uint256">
+  The minuend
+</ParamField>
+
+<ParamField path="y" type="uint256">
+  The subtrahend
+</ParamField>
+
+**Returns:** The result of `x - y` if `x > y`, otherwise 0
+
+---
+
+### toUint128
+
+```solidity
+function toUint128(uint256 x) internal pure returns (uint128)
+```
+
+Casts from `uint256` to `uint128`, reverting if the input number is too large.
+
+<ParamField path="x" type="uint256">
+  The value to cast
+</ParamField>
+
+**Returns:** The value cast to `uint128`
+
+**Reverts:** `ErrorsLib.CastOverflow()` if `x > type(uint128).max`
+
+---
+
+### toUint256
+
+```solidity
+function toUint256(int256 x) internal pure returns (uint256)
+```
+
+Casts from `int256` to `uint256`, reverting if the input number is negative.
+
+<ParamField path="x" type="int256">
+  The value to cast
+</ParamField>
+
+**Returns:** The value cast to `uint256`
+
+**Reverts:** `ErrorsLib.CastOverflow()` if `x < 0`
+
+---
+
+### min
+
+```solidity
+function min(uint256 x, uint256 y) internal pure returns (uint256 z)
+```
+
+Returns the minimum of two values.
+
+<ParamField path="x" type="uint256">
+  The first value
+</ParamField>
+
+<ParamField path="y" type="uint256">
+  The second value
+</ParamField>
+
+**Returns:** The smaller of `x` and `y`
+
+---
+
+## Source code
+
+```solidity
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (c) 2025 Morpho Association
+pragma solidity ^0.8.0;
+
+import {ErrorsLib} from "./ErrorsLib.sol";
+
+library MathLib {
+    /// @dev Returns (x * y) / d rounded down.
+    function mulDivDown(uint256 x, uint256 y, uint256 d) internal pure returns (uint256) {
+        return (x * y) / d;
+    }
+
+    /// @dev Returns (x * y) / d rounded up.
+    function mulDivUp(uint256 x, uint256 y, uint256 d) internal pure returns (uint256) {
+        return (x * y + (d - 1)) / d;
+    }
+
+    /// @dev Returns max(0, x - y).
+    function zeroFloorSub(uint256 x, uint256 y) internal pure returns (uint256 z) {
+        assembly {
+            z := mul(gt(x, y), sub(x, y))
+        }
+    }
+
+    /// @dev Casts from uint256 to uint128, reverting if input number is too large.
+    function toUint128(uint256 x) internal pure returns (uint128) {
+        require(x <= type(uint128).max, ErrorsLib.CastOverflow());
+        // forge-lint: disable-next-item(unsafe-typecast) safe because x <= type(uint128).max.
+        return uint128(x);
+    }
+
+    /// @dev Casts from int256 to uint256, reverting if input number is negative.
+    function toUint256(int256 x) internal pure returns (uint256) {
+        require(x >= 0, ErrorsLib.CastOverflow());
+        // forge-lint: disable-next-item(unsafe-typecast) safe because x >= 0.
+        return uint256(x);
+    }
+
+    /// @dev Returns min(x, y).
+    function min(uint256 x, uint256 y) internal pure returns (uint256 z) {
+        assembly {
+            z := xor(x, mul(xor(x, y), lt(y, x)))
+        }
+    }
+}
+```

@@ -1,0 +1,125 @@
+---
+title: Introduction to Morpho Vault V2
+description: Discover Morpho Vault V2, a non-custodial asset allocation protocol that enables efficient yield management across multiple markets
+---
+
+# Introduction to Morpho Vault V2
+
+Morpho Vault V2 enables anyone to create non-custodial vaults that allocate assets into different markets. Depositors earn from underlying markets without having to actively manage their positions, while a set of specialized roles handles the curation and allocation of deposited assets.
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="diagram-project" href="/architecture">
+    Explore the system architecture and core components
+  </Card>
+  <Card title="Key features" icon="sparkles" href="/key-features">
+    Learn about the unique capabilities and features
+  </Card>
+  <Card title="Adapters" icon="plug" href="/concepts/adapters">
+    Understand how vaults connect to underlying markets
+  </Card>
+  <Card title="Roles" icon="users" href="/concepts/roles">
+    Discover the role-based access control system
+  </Card>
+</CardGroup>
+
+## What is Morpho Vault V2?
+
+Morpho Vault V2 is a fully **immutable** and **non-custodial** vault system that allows users to deposit assets and earn yield across multiple DeFi markets. The protocol separates concerns between different roles, enabling specialized management while maintaining strong security guarantees for depositors.
+
+### Core benefits
+
+- **Non-custodial**: Users maintain full control and can always withdraw their assets through in-kind redemptions
+- **Flexible allocation**: Assets can be distributed across multiple markets via adapters
+- **Role-based management**: Specialized roles (owner, curator, allocators, sentinels) manage different aspects
+- **Timelock protection**: Critical configuration changes are timelocked to protect depositors
+- **ERC-4626 compliant**: Full compatibility with the ERC-4626 vault standard
+
+## How it works
+
+Vault V2 operates through a sophisticated architecture:
+
+1. **Depositors** supply assets to the vault and receive ERC-4626 compliant shares
+2. **Allocators** distribute assets across enabled adapters within curator-defined risk limits
+3. **Adapters** interact with underlying markets (Morpho Blue, MetaMorpho V1, etc.)
+4. **Curators** configure risk parameters, caps, fees, and enabled adapters
+5. **Sentinels** provide emergency risk management capabilities
+
+<Note>
+All vault contracts are **immutable** and deployed via the VaultV2Factory. This ensures predictable behavior and eliminates upgrade risks.
+</Note>
+
+## Key concepts
+
+### Adapters
+
+Adapters are separate contracts that hold positions on behalf of the vault. They enable vaults to interact with different types of markets while maintaining a consistent interface. Currently available adapters include:
+
+- **Morpho Market V1 Adapter V2** - Connects to Morpho Blue markets
+- **Morpho Vault V1 Adapter** - Connects to MetaMorpho V1 vaults
+- **Morpho Market V2 Adapter** (work in progress)
+
+### Caps system
+
+The vault uses an ID-based caps system to manage risk:
+
+- **Absolute caps**: Hard limits on allocation to positions sharing a risk ID
+- **Relative caps**: Proportional limits relative to total vault assets
+- **Risk IDs**: Abstract identifiers for common risk factors (collateral, oracle, protocol, etc.)
+
+### Liquidity management
+
+Vaults maintain liquidity through:
+
+- **Idle assets**: Token balance held directly by the vault
+- **Liquidity adapter**: Optional adapter for highly liquid markets
+- **Force deallocate**: Permissionless function to extract liquidity from adapters
+
+<Info>
+Users can always exit through in-kind redemptions, even when underlying markets are illiquid, by using the `forceDeallocate` mechanism.
+</Info>
+
+## Getting started
+
+Vaults are deployed through the VaultV2Factory:
+
+```solidity
+interface IVaultV2Factory {
+    function createVaultV2(
+        address owner,
+        address asset,
+        bytes32 salt
+    ) external returns (address);
+}
+```
+
+<Warning>
+At creation, all timelocks are set to zero for quick setup. Configure appropriate timelocks and gates before accepting deposits to protect users.
+</Warning>
+
+## Non-custodial guarantees
+
+Morpho Vault V2 provides strong non-custodial guarantees through:
+
+1. **In-kind redemptions**: Users can always exit by converting vault shares to underlying market positions
+2. **Timelocks**: Critical changes require waiting periods, giving users time to exit
+3. **Force deallocate**: Permissionless mechanism to extract liquidity with optional penalties (up to 2%)
+4. **Immutable contracts**: No upgrade capabilities that could compromise user funds
+
+## ERC-4626 compliance
+
+Vault V2 is fully compliant with [ERC-4626](https://eips.ethereum.org/EIPS/eip-4626) and [ERC-2612](https://eips.ethereum.org/EIPS/eip-2612) (permit extension).
+
+<Warning>
+The vault has non-conventional behavior on max functions (`maxDeposit`, `maxMint`, `maxWithdraw`, `maxRedeem`): they always return zero.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Explore architecture" href="/architecture">
+    Deep dive into the system design and components
+  </Card>
+  <Card title="Learn key features" href="/key-features">
+    Understand timelocks, gates, fees, and more
+  </Card>
+</CardGroup>

@@ -1,0 +1,181 @@
+---
+title: Vaults
+description: Understanding Morpho Vault V2 architecture, ERC-4626 compliance, and share mechanics
+---
+
+Morpho Vault V2 enables anyone to create non-custodial vaults that allocate assets into different markets. Depositors earn from underlying markets without actively managing their positions, while curation is handled by defined roles.
+
+## ERC-4626 compliance
+
+Vault V2 is fully compliant with [ERC-4626](https://eips.ethereum.org/EIPS/eip-4626) and [ERC-2612](https://eips.ethereum.org/EIPS/eip-2612) (permit extension).
+
+<Warning>
+The vault has non-conventional behavior on max functions (`maxDeposit`, `maxMint`, `maxWithdraw`, `maxRedeem`): they always return zero. This is a gross underestimation because being revert-free cannot be guaranteed when calling gates.
+</Warning>
+
+## Virtual shares and decimal offset
+
+The vault uses virtual shares to protect against inflation attacks:
+
+```solidity
+uint256 public immutable virtualShares;
+uint8 public immutable decimals;
+```
+
+**Virtual shares calculation:**
+- Decimal offset = `max(0, 18 - assetDecimals)`
+- Virtual shares = `10^decimalOffset`
+- Vault decimals = `assetDecimals + decimalOffset`
+
+<Info>
+To protect against inflation attacks, the vault might need to be seeded with an initial deposit. See the [OpenZeppelin ERC-4626 guide](https://docs.openzeppelin.com/contracts/5.x/erc4626#inflation-attack) for more details.
+</Info>
+
+### Share calculation examples
+
+**Preview deposit (assets to shares):**
+```solidity
+function previewDeposit(uint256 assets) public view returns (uint256) {
+    (uint256 newTotalAssets, uint256 performanceFeeShares, uint256 managementFeeShares) = accrueInterestView();
+    uint256 newTotalSupply = totalSupply + performanceFeeShares + managementFeeShares;
+    return assets.mulDivDown(newTotalSupply + virtualShares, newTotalAssets + 1);
+}
+```
+
+**Preview redeem (shares to assets):**
+```solidity
+function previewRedeem(uint256 shares) public view returns (uint256) {
+    (uint256 newTotalAssets, uint256 performanceFeeShares, uint256 managementFeeShares) = accrueInterestView();
+    uint256 newTotalSupply = totalSupply + performanceFeeShares + managementFeeShares;
+    return shares.mulDivDown(newTotalAssets + 1, newTotalSupply + virtualShares);
+}
+```
+
+## Share price dynamics
+
+The vault's share price is influenced by several factors:
+
+### Interest accrual
+
+Interest and losses are accounted only once per transaction at the first interaction with the vault. The vault loops through all adapters to calculate real assets:
+
+```solidity
+function accrueInterestView() public view returns (uint256, uint256, uint256) {
+    if (firstTotalAssets != 0) return (_totalAssets, 0, 0);
+    uint256 elapsed = block.timestamp - lastUpdate;
+    uint256 realAssets = IERC20(asset).balanceOf(address(this));
+    for (uint256 i = 0; i < adapters.length; i++) {
+        realAssets += IAdapter(adapters[i]).realAssets();
+    }
+    uint256 maxTotalAssets = _totalAssets + (_totalAssets * elapsed).mulDivDown(maxRate, WAD);
+    uint256 newTotalAssets = MathLib.min(realAssets, maxTotalAssets);
+    // ... fee calculation
+}
+```
+
+### Max rate cap
+
+The vault's share price will not increase faster than the allocator-set `maxRate`. This helps:
+- Stabilize the distributed rate
+- Build a buffer to absorb losses
+- Prevent opportunistic depositors from diluting interest through donations
+
+<Note>
+Donations and `forceDeallocate` penalties increase the rate, which can attract opportunistic depositors. This can be mitigated by reducing the `maxRate`.
+</Note>
+
+### Loss realization
+
+Loss realization occurs in `accrueInterest` and decreases total assets, causing shares to lose value:
+
+<Warning>
+Vault shares should not be loanable to prevent share shorting on loss realization. Shares can be flashloanable because flashloan-based shorting is prevented as interests and losses are only accounted once per transaction.
+</Warning>
+
+## Total assets tracking
+
+The vault maintains multiple views of total assets:
+
+- `_totalAssets`: Last recorded total assets (storage)
+- `totalAssets()`: Updated total assets including accrued interest
+- `firstTotalAssets`: Total assets after first interest accrual in current transaction
+
+```solidity
+uint128 public _totalAssets;
+uint256 public transient firstTotalAssets;
+uint64 public lastUpdate;
+```
+
+The `firstTotalAssets` variable:
+- Tracks total assets after first interest accrual of the transaction
+- Prevents bypassing relative caps with flashloans
+- Ensures interest accrues only once per transaction
+
+## Deposit and withdrawal flow
+
+<Steps>
+  <Step title="Deposit">
+    Users call `deposit(assets, onBehalf)` or `mint(shares, onBehalf)`:
+    1. Interest is accrued
+    2. Shares are calculated and minted
+    3. Assets are transferred from user to vault
+    4. If liquidity adapter is set, assets are allocated to it
+  </Step>
+  
+  <Step title="Withdrawal">
+    Users call `withdraw(assets, receiver, onBehalf)` or `redeem(shares, receiver, onBehalf)`:
+    1. Interest is accrued
+    2. Assets/shares are calculated
+    3. Idle assets are used first
+    4. If insufficient, liquidity adapter is deallocated
+    5. Shares are burned and assets transferred
+  </Step>
+</Steps>
+
+### Entry implementation
+
+```solidity
+function enter(uint256 assets, uint256 shares, address onBehalf) internal {
+    require(canReceiveShares(onBehalf), ErrorsLib.CannotReceiveShares());
+    require(canSendAssets(msg.sender), ErrorsLib.CannotSendAssets());
+
+    SafeERC20Lib.safeTransferFrom(asset, msg.sender, address(this), assets);
+    createShares(onBehalf, shares);
+    _totalAssets += assets.toUint128();
+    emit EventsLib.Deposit(msg.sender, onBehalf, assets, shares);
+
+    if (liquidityAdapter != address(0)) allocateInternal(liquidityAdapter, liquidityData, assets);
+}
+```
+
+### Exit implementation
+
+```solidity
+function exit(uint256 assets, uint256 shares, address receiver, address onBehalf) internal {
+    require(canSendShares(onBehalf), ErrorsLib.CannotSendShares());
+    require(canReceiveAssets(receiver), ErrorsLib.CannotReceiveAssets());
+
+    uint256 idleAssets = IERC20(asset).balanceOf(address(this));
+    if (assets > idleAssets && liquidityAdapter != address(0)) {
+        deallocateInternal(liquidityAdapter, liquidityData, assets - idleAssets);
+    }
+
+    if (msg.sender != onBehalf) {
+        uint256 _allowance = allowance[onBehalf][msg.sender];
+        if (_allowance != type(uint256).max) allowance[onBehalf][msg.sender] = _allowance - shares;
+    }
+
+    deleteShares(onBehalf, shares);
+    _totalAssets -= assets.toUint128();
+    SafeERC20Lib.safeTransfer(asset, receiver, assets);
+    emit EventsLib.Withdraw(msg.sender, receiver, onBehalf, assets, shares);
+}
+```
+
+## Immutability
+
+All vault contracts are immutable. Vaults are deployed via the [VaultV2Factory](https://github.com/morpho-org/vault-v2/blob/main/src/VaultV2Factory.sol), which creates instances with fixed code that cannot be upgraded.
+
+<Note>
+While the vault code is immutable, configuration can be changed through the curator role (subject to timelocks and other restrictions).
+</Note>

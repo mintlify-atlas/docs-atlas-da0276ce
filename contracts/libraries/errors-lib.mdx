@@ -1,0 +1,448 @@
+---
+title: ErrorsLib
+description: Library of custom error definitions for Morpho Vault V2
+---
+
+The `ErrorsLib` library defines all custom errors used throughout the Morpho Vault V2 system for gas-efficient error handling.
+
+## Errors
+
+### Abdicated
+
+```solidity
+error Abdicated();
+```
+
+Thrown when attempting to use a function that has been abdicated (permanently disabled).
+
+---
+
+### AbsoluteCapExceeded
+
+```solidity
+error AbsoluteCapExceeded();
+```
+
+Thrown when an operation would exceed the absolute cap limit.
+
+---
+
+### AbsoluteCapNotDecreasing
+
+```solidity
+error AbsoluteCapNotDecreasing();
+```
+
+Thrown when attempting to decrease an absolute cap to a value that is not lower than the current cap.
+
+---
+
+### AbsoluteCapNotIncreasing
+
+```solidity
+error AbsoluteCapNotIncreasing();
+```
+
+Thrown when attempting to increase an absolute cap to a value that is not higher than the current cap.
+
+---
+
+### ApproveReturnedFalse
+
+```solidity
+error ApproveReturnedFalse();
+```
+
+Thrown when an ERC20 approve call returns false.
+
+---
+
+### ApproveReverted
+
+```solidity
+error ApproveReverted();
+```
+
+Thrown when an ERC20 approve call reverts.
+
+---
+
+### AutomaticallyTimelocked
+
+```solidity
+error AutomaticallyTimelocked();
+```
+
+Thrown when attempting to execute a function that requires timelock submission first.
+
+---
+
+### CannotReceiveShares
+
+```solidity
+error CannotReceiveShares();
+```
+
+Thrown when a recipient is not allowed to receive shares based on the receive shares gate.
+
+---
+
+### CannotReceiveAssets
+
+```solidity
+error CannotReceiveAssets();
+```
+
+Thrown when a recipient is not allowed to receive assets based on the receive assets gate.
+
+---
+
+### CannotSendShares
+
+```solidity
+error CannotSendShares();
+```
+
+Thrown when a sender is not allowed to send shares based on the send shares gate.
+
+---
+
+### CannotSendAssets
+
+```solidity
+error CannotSendAssets();
+```
+
+Thrown when a sender is not allowed to send assets based on the send assets gate.
+
+---
+
+### CapExceeded
+
+```solidity
+error CapExceeded();
+```
+
+Thrown when a general cap limit is exceeded.
+
+---
+
+### CastOverflow
+
+```solidity
+error CastOverflow();
+```
+
+Thrown when a type cast would result in overflow.
+
+---
+
+### DataAlreadyPending
+
+```solidity
+error DataAlreadyPending();
+```
+
+Thrown when attempting to submit timelocked data that is already pending.
+
+---
+
+### DataNotTimelocked
+
+```solidity
+error DataNotTimelocked();
+```
+
+Thrown when attempting to execute data that has not been submitted to the timelock.
+
+---
+
+### FeeInvariantBroken
+
+```solidity
+error FeeInvariantBroken();
+```
+
+Thrown when the fee invariant is violated.
+
+---
+
+### FeeTooHigh
+
+```solidity
+error FeeTooHigh();
+```
+
+Thrown when a fee exceeds the maximum allowed value.
+
+---
+
+### InvalidSigner
+
+```solidity
+error InvalidSigner();
+```
+
+Thrown when a signature verification fails due to an invalid signer.
+
+---
+
+### MaxRateTooHigh
+
+```solidity
+error MaxRateTooHigh();
+```
+
+Thrown when attempting to set a maximum rate that exceeds the allowed limit.
+
+---
+
+### NoCode
+
+```solidity
+error NoCode();
+```
+
+Thrown when an expected contract address has no code deployed.
+
+---
+
+### NotAdapter
+
+```solidity
+error NotAdapter();
+```
+
+Thrown when an address is not a registered adapter.
+
+---
+
+### NotInAdapterRegistry
+
+```solidity
+error NotInAdapterRegistry();
+```
+
+Thrown when an adapter is not found in the adapter registry.
+
+---
+
+### PenaltyTooHigh
+
+```solidity
+error PenaltyTooHigh();
+```
+
+Thrown when a penalty exceeds the maximum allowed value.
+
+---
+
+### PermitDeadlineExpired
+
+```solidity
+error PermitDeadlineExpired();
+```
+
+Thrown when a permit signature has expired.
+
+---
+
+### RelativeCapAboveOne
+
+```solidity
+error RelativeCapAboveOne();
+```
+
+Thrown when attempting to set a relative cap above 100% (1e18).
+
+---
+
+### RelativeCapExceeded
+
+```solidity
+error RelativeCapExceeded();
+```
+
+Thrown when an operation would exceed the relative cap limit.
+
+---
+
+### RelativeCapNotDecreasing
+
+```solidity
+error RelativeCapNotDecreasing();
+```
+
+Thrown when attempting to decrease a relative cap to a value that is not lower than the current cap.
+
+---
+
+### RelativeCapNotIncreasing
+
+```solidity
+error RelativeCapNotIncreasing();
+```
+
+Thrown when attempting to increase a relative cap to a value that is not higher than the current cap.
+
+---
+
+### TimelockNotDecreasing
+
+```solidity
+error TimelockNotDecreasing();
+```
+
+Thrown when attempting to decrease a timelock to a value that is not lower than the current duration.
+
+---
+
+### TimelockNotExpired
+
+```solidity
+error TimelockNotExpired();
+```
+
+Thrown when attempting to execute timelocked data before the timelock period has expired.
+
+---
+
+### TimelockNotIncreasing
+
+```solidity
+error TimelockNotIncreasing();
+```
+
+Thrown when attempting to increase a timelock to a value that is not higher than the current duration.
+
+---
+
+### TransferFromReturnedFalse
+
+```solidity
+error TransferFromReturnedFalse();
+```
+
+Thrown when an ERC20 transferFrom call returns false.
+
+---
+
+### TransferFromReverted
+
+```solidity
+error TransferFromReverted();
+```
+
+Thrown when an ERC20 transferFrom call reverts.
+
+---
+
+### TransferReturnedFalse
+
+```solidity
+error TransferReturnedFalse();
+```
+
+Thrown when an ERC20 transfer call returns false.
+
+---
+
+### TransferReverted
+
+```solidity
+error TransferReverted();
+```
+
+Thrown when an ERC20 transfer call reverts.
+
+---
+
+### Unauthorized
+
+```solidity
+error Unauthorized();
+```
+
+Thrown when a caller does not have the required authorization.
+
+---
+
+### ZeroAbsoluteCap
+
+```solidity
+error ZeroAbsoluteCap();
+```
+
+Thrown when attempting to set an absolute cap to zero.
+
+---
+
+### ZeroAddress
+
+```solidity
+error ZeroAddress();
+```
+
+Thrown when a zero address is provided where a valid address is required.
+
+---
+
+### ZeroAllocation
+
+```solidity
+error ZeroAllocation();
+```
+
+Thrown when attempting an allocation with zero amount.
+
+---
+
+## Source code
+
+```solidity
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (c) 2025 Morpho Association
+pragma solidity ^0.8.0;
+
+library ErrorsLib {
+    error Abdicated();
+    error AbsoluteCapExceeded();
+    error AbsoluteCapNotDecreasing();
+    error AbsoluteCapNotIncreasing();
+    error ApproveReturnedFalse();
+    error ApproveReverted();
+    error AutomaticallyTimelocked();
+    error CannotReceiveShares();
+    error CannotReceiveAssets();
+    error CannotSendShares();
+    error CannotSendAssets();
+    error CapExceeded();
+    error CastOverflow();
+    error DataAlreadyPending();
+    error DataNotTimelocked();
+    error FeeInvariantBroken();
+    error FeeTooHigh();
+    error InvalidSigner();
+    error MaxRateTooHigh();
+    error NoCode();
+    error NotAdapter();
+    error NotInAdapterRegistry();
+    error PenaltyTooHigh();
+    error PermitDeadlineExpired();
+    error RelativeCapAboveOne();
+    error RelativeCapExceeded();
+    error RelativeCapNotDecreasing();
+    error RelativeCapNotIncreasing();
+    error TimelockNotDecreasing();
+    error TimelockNotExpired();
+    error TimelockNotIncreasing();
+    error TransferFromReturnedFalse();
+    error TransferFromReverted();
+    error TransferReturnedFalse();
+    error TransferReverted();
+    error Unauthorized();
+    error ZeroAbsoluteCap();
+    error ZeroAddress();
+    error ZeroAllocation();
+}
+```

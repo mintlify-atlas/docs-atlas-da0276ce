@@ -1,0 +1,225 @@
+---
+title: Managing vault liquidity
+description: Configure and manage liquidity adapters for efficient deposits and withdrawals in Morpho Vault V2
+---
+
+## Overview
+
+The liquidity adapter mechanism in Morpho Vault V2 enables automated allocation and deallocation of assets during user deposits and withdrawals. This ensures efficient capital deployment while maintaining sufficient liquidity for redemptions.
+
+## Liquidity adapter concept
+
+The liquidity adapter is a designated adapter used automatically during:
+
+- **Deposits/Mints**: Assets are allocated to the liquidity adapter after user deposits
+- **Withdrawals/Redeems**: Assets are deallocated from the liquidity adapter when idle assets are insufficient
+
+<Info>
+The same adapter and data are used for both entry and exit. This ensures that supply-withdraw or withdraw-supply loops don't change the overall allocation pattern.
+</Info>
+
+Source: `VaultV2.sol:104-112`
+
+## Setting the liquidity adapter
+
+Allocators can configure the liquidity adapter and its data:
+
+```solidity
+function setLiquidityAdapterAndData(
+    address newLiquidityAdapter,
+    bytes memory newLiquidityData
+) external;
+```
+
+### Example configuration
+
+```solidity
+// Set a liquidity adapter for automatic allocation
+vault.setLiquidityAdapterAndData(
+    liquidityAdapterAddress,
+    abi.encode(marketId, parameters)
+);
+```
+
+<Warning>
+Only allocators can set the liquidity adapter. The function does not verify that `newLiquidityAdapter` is a registered adapter—this is checked during actual allocate/deallocate operations.
+</Warning>
+
+Source: `VaultV2.sol:628-633`
+
+## Deposit flow with liquidity adapter
+
+When users deposit or mint shares, the vault automatically allocates assets:
+
+<Steps>
+  <Step title="Accrue interest">
+    The vault accrues pending interest to update the exchange rate.
+  </Step>
+  
+  <Step title="Transfer assets">
+    User assets are transferred to the vault.
+  </Step>
+  
+  <Step title="Mint shares">
+    Shares are minted to the recipient based on the current exchange rate.
+  </Step>
+  
+  <Step title="Auto-allocate">
+    If `liquidityAdapter` is set, the deposited assets are automatically allocated to it.
+  </Step>
+</Steps>
+
+### Deposit code flow
+
+```solidity
+function enter(uint256 assets, uint256 shares, address onBehalf) internal {
+    // ... transfer assets and mint shares ...
+    
+    if (liquidityAdapter != address(0)) {
+        allocateInternal(liquidityAdapter, liquidityData, assets);
+    }
+}
+```
+
+Source: `VaultV2.sol:776-786`
+
+## Withdrawal flow with liquidity adapter
+
+When users withdraw or redeem shares, the vault deallocates if needed:
+
+<Steps>
+  <Step title="Check idle assets">
+    The vault checks its current asset balance.
+  </Step>
+  
+  <Step title="Deallocate if needed">
+    If idle assets are insufficient and `liquidityAdapter` is set, assets are deallocated from it.
+  </Step>
+  
+  <Step title="Burn shares">
+    User shares are burned.
+  </Step>
+  
+  <Step title="Transfer assets">
+    Assets are transferred to the receiver.
+  </Step>
+</Steps>
+
+### Withdrawal code flow
+
+```solidity
+function exit(uint256 assets, uint256 shares, address receiver, address onBehalf) internal {
+    uint256 idleAssets = IERC20(asset).balanceOf(address(this));
+    
+    if (assets > idleAssets && liquidityAdapter != address(0)) {
+        deallocateInternal(liquidityAdapter, liquidityData, assets - idleAssets);
+    }
+    
+    // ... burn shares and transfer assets ...
+}
+```
+
+Source: `VaultV2.sol:805-823`
+
+## Liquidity adapter considerations
+
+### Cap implications
+
+<Warning>
+If a cap (absolute or relative) associated with the liquidity adapter's IDs is reached, deposits and mints will revert. This is particularly relevant when:
+- The vault is empty or nearly empty (relative cap checks are strict)
+- Total allocations approach the absolute cap
+</Warning>
+
+### Relative cap with low TVL
+
+When the vault has very low total assets, the relative cap mechanism can make deposits difficult:
+
+```solidity
+// Example: Vault has 100 assets, relative cap is 50%
+// User tries to deposit 1000 assets
+vault.deposit(1000, user);  // Will likely revert
+// Because: 1000 > firstTotalAssets * 0.5 = 100 * 0.5 = 50
+```
+
+<Note>
+To allow deposits when the vault is nearly empty, consider:
+- Setting relative caps to WAD (100%) for liquidity adapter IDs
+- Using only absolute caps for liquidity adapters
+- Temporarily removing the liquidity adapter during initial deposits
+</Note>
+
+Source: `VaultV2.sol:110-112`
+
+## Disabling automatic allocation
+
+To disable automatic allocation and deallocation:
+
+```solidity
+// Set liquidity adapter to zero address
+vault.setLiquidityAdapterAndData(address(0), "");
+```
+
+With no liquidity adapter:
+- Deposits remain in the vault as idle assets
+- Withdrawals can only use idle assets (no automatic deallocation)
+- Allocators must manually manage all allocations
+
+## Liquidity adapter data
+
+The `liquidityData` parameter is adapter-specific encoded data:
+
+```solidity
+// Example: Encoding market parameters
+bytes memory data = abi.encode(
+    marketId,
+    minAmount,
+    maxSlippage
+);
+
+vault.setLiquidityAdapterAndData(adapter, data);
+```
+
+<Info>
+`liquidityData` is indexed in the event so it cannot be read from logs. To retrieve current liquidity data, call `vault.liquidityData()`.
+</Info>
+
+Source: `VaultV2.sol:236-239`
+
+## Access control
+
+Only allocators can set the liquidity adapter and data:
+
+```solidity
+require(isAllocator[msg.sender], ErrorsLib.Unauthorized());
+```
+
+This prevents unauthorized parties from disrupting deposit and withdrawal flows.
+
+Source: `VaultV2.sol:629`
+
+## Best practices
+
+<Steps>
+  <Step title="Choose liquid markets">
+    Select adapters pointing to highly liquid markets to ensure withdrawals don't fail.
+  </Step>
+  
+  <Step title="Set appropriate caps">
+    Configure caps that allow normal deposit flow while maintaining risk limits.
+  </Step>
+  
+  <Step title="Monitor adapter health">
+    Regularly check that the liquidity adapter can handle expected deposit/withdrawal volumes.
+  </Step>
+  
+  <Step title="Test with empty vault">
+    Verify deposits work when the vault has low TVL (relative cap edge case).
+  </Step>
+</Steps>
+
+## In-kind redemptions
+
+Even if the liquidity adapter cannot deallocate (market is illiquid), users can still exit using [force deallocate](/operations/force-deallocate) to withdraw directly from any market at the cost of a penalty.
+
+Source: `VaultV2.sol:76`

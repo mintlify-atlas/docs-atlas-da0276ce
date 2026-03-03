@@ -1,0 +1,285 @@
+---
+title: MorphoVaultV1Adapter
+description: Adapter contract for integrating Morpho Vaults V1 (MetaMorpho) with Morpho Vault V2
+---
+
+## Overview
+
+The `MorphoVaultV1Adapter` contract enables Morpho Vault V2 to allocate assets to Morpho Vaults V1 (also known as MetaMorpho). This adapter provides a simple interface for depositing into and withdrawing from V1 vaults while managing rewards through a skim mechanism.
+
+<Note>
+This adapter is designed and audited specifically for Morpho Vaults V1 (versions V1.0 and V1.1). Integration with other vaults must be carefully assessed from a security standpoint.
+</Note>
+
+<Warning>
+- Must only be used with Morpho Vaults V1 protected against inflation attacks with an initial deposit
+- Must not be used with a Morpho Vault V1 that has a market with an IRM that can re-enter the parent vault or adapter
+- Morpho Vaults V1.1 do not realize bad debt, so Morpho Vaults V2 supplying to them will not realize corresponding bad debt
+- Losses corresponding to rounding errors are realizable
+- Shares of the Morpho Vault V1 cannot be skimmed (only other tokens)
+</Warning>
+
+## Contract details
+
+**License:** GPL-2.0-or-later  
+**Solidity version:** 0.8.28
+
+## State variables
+
+### Immutable variables
+
+#### factory
+
+```solidity
+address public immutable factory
+```
+
+The address of the factory contract that deployed this adapter.
+
+#### parentVault
+
+```solidity
+address public immutable parentVault
+```
+
+The address of the parent Morpho Vault V2 that uses this adapter.
+
+#### morphoVaultV1
+
+```solidity
+address public immutable morphoVaultV1
+```
+
+The address of the Morpho Vault V1 (MetaMorpho) that this adapter interacts with.
+
+#### adapterId
+
+```solidity
+bytes32 public immutable adapterId
+```
+
+Unique identifier for this adapter instance, computed as `keccak256(abi.encode("this", address(this)))`.
+
+### Storage variables
+
+#### skimRecipient
+
+```solidity
+address public skimRecipient
+```
+
+The address that receives skimmed tokens (rewards). Set by the vault owner.
+
+## Constructor
+
+```solidity
+constructor(address _parentVault, address _morphoVaultV1)
+```
+
+Initializes the adapter with the parent vault and target Morpho Vault V1.
+
+<ParamField path="_parentVault" type="address">
+  The address of the parent Morpho Vault V2
+</ParamField>
+
+<ParamField path="_morphoVaultV1" type="address">
+  The address of the Morpho Vault V1 to integrate with
+</ParamField>
+
+<Note>
+The constructor verifies that the asset of the parent vault matches the asset of the Morpho Vault V1.
+</Note>
+
+## View functions
+
+### ids
+
+```solidity
+function ids() public view returns (bytes32[] memory)
+```
+
+Returns the adapter's allocation IDs.
+
+<ResponseField name="ids" type="bytes32[]">
+  Array containing a single element: the adapter ID
+</ResponseField>
+
+### allocation
+
+```solidity
+function allocation() public view returns (uint256)
+```
+
+Returns the current allocation amount in the parent vault.
+
+<ResponseField name="allocation" type="uint256">
+  The allocation amount from the parent vault
+</ResponseField>
+
+### realAssets
+
+```solidity
+function realAssets() external view returns (uint256)
+```
+
+Returns the real assets held in the Morpho Vault V1, based on the adapter's share balance.
+
+<ResponseField name="assets" type="uint256">
+  The preview redemption value of the adapter's shares, or 0 if allocation is 0
+</ResponseField>
+
+## Functions
+
+### setSkimRecipient
+
+```solidity
+function setSkimRecipient(address newSkimRecipient) external
+```
+
+Sets the recipient address for skimmed tokens. Only callable by the vault owner.
+
+<ParamField path="newSkimRecipient" type="address">
+  The new skim recipient address
+</ParamField>
+
+### skim
+
+```solidity
+function skim(address token) external
+```
+
+Skims the adapter's balance of a token and sends it to the skim recipient. Only callable by the skim recipient.
+
+<ParamField path="token" type="address">
+  The token address to skim (cannot be Morpho Vault V1 shares)
+</ParamField>
+
+<Warning>
+Cannot skim Morpho Vault V1 shares. Attempting to do so will revert with `CannotSkimMorphoVaultV1Shares()`.
+</Warning>
+
+### allocate
+
+```solidity
+function allocate(
+    bytes memory data,
+    uint256 assets,
+    bytes4,
+    address
+) external returns (bytes32[] memory, int256)
+```
+
+Allocates assets to the Morpho Vault V1 by depositing. Only callable by the parent vault.
+
+<ParamField path="data" type="bytes">
+  Must be empty (length 0)
+</ParamField>
+
+<ParamField path="assets" type="uint256">
+  Amount of assets to allocate (deposit)
+</ParamField>
+
+<ResponseField name="ids" type="bytes32[]">
+  The adapter's allocation IDs
+</ResponseField>
+
+<ResponseField name="change" type="int256">
+  The change in allocation amount (new allocation - old allocation)
+</ResponseField>
+
+<Note>
+This function does not emit any events because the IDs logged in the parent vault are sufficient.
+</Note>
+
+### deallocate
+
+```solidity
+function deallocate(
+    bytes memory data,
+    uint256 assets,
+    bytes4,
+    address
+) external returns (bytes32[] memory, int256)
+```
+
+Deallocates assets from the Morpho Vault V1 by withdrawing. Only callable by the parent vault.
+
+<ParamField path="data" type="bytes">
+  Must be empty (length 0)
+</ParamField>
+
+<ParamField path="assets" type="uint256">
+  Amount of assets to deallocate (withdraw)
+</ParamField>
+
+<ResponseField name="ids" type="bytes32[]">
+  The adapter's allocation IDs
+</ResponseField>
+
+<ResponseField name="change" type="int256">
+  The change in allocation amount (new allocation - old allocation)
+</ResponseField>
+
+<Note>
+This function does not emit any events because the IDs logged in the parent vault are sufficient.
+</Note>
+
+## Events
+
+### SetSkimRecipient
+
+```solidity
+event SetSkimRecipient(address indexed newSkimRecipient)
+```
+
+Emitted when the skim recipient address is updated.
+
+### Skim
+
+```solidity
+event Skim(address indexed token, uint256 assets)
+```
+
+Emitted when tokens are skimmed from the adapter.
+
+<ParamField path="token" type="address" isEvent>
+  The address of the token that was skimmed
+</ParamField>
+
+<ParamField path="assets" type="uint256" isEvent>
+  The amount of tokens skimmed
+</ParamField>
+
+## Errors
+
+### AssetMismatch
+
+```solidity
+error AssetMismatch()
+```
+
+Thrown during construction if the parent vault's asset does not match the Morpho Vault V1's asset.
+
+### CannotSkimMorphoVaultV1Shares
+
+```solidity
+error CannotSkimMorphoVaultV1Shares()
+```
+
+Thrown when attempting to skim the Morpho Vault V1 share tokens.
+
+### InvalidData
+
+```solidity
+error InvalidData()
+```
+
+Thrown when non-empty data is provided to `allocate` or `deallocate` functions.
+
+### NotAuthorized
+
+```solidity
+error NotAuthorized()
+```
+
+Thrown when the caller is not authorized to perform the operation.

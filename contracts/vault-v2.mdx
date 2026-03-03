@@ -1,0 +1,1561 @@
+---
+title: VaultV2
+description: Complete reference for the Morpho VaultV2 contract, an ERC-4626 compliant vault with advanced allocation and fee management
+---
+
+# VaultV2
+
+The VaultV2 contract is an ERC-4626 compliant vault that implements advanced asset allocation strategies across multiple adapters, fee management, timelock-protected governance, and flexible access controls.
+
+## Overview
+
+VaultV2 extends the ERC-4626 standard with:
+- Multi-adapter allocation system with configurable caps
+- Timelock-protected curator functions
+- Role-based access control (owner, curator, allocators, sentinels)
+- Performance and management fee accrual
+- Gate-based transfer restrictions
+- ERC-2612 permit functionality
+
+## Immutable variables
+
+<ParamField path="asset" type="address">
+  The address of the underlying ERC-20 asset managed by the vault
+</ParamField>
+
+<ParamField path="decimals" type="uint8">
+  The number of decimals used for vault shares (assetDecimals + decimalOffset, where decimalOffset = max(0, 18 - assetDecimals))
+</ParamField>
+
+<ParamField path="virtualShares" type="uint256">
+  Virtual shares used for inflation attack protection (equals 10^decimalOffset)
+</ParamField>
+
+## State variables
+
+### Role storage
+
+<ParamField path="owner" type="address">
+  The vault owner who can set the curator and sentinels
+</ParamField>
+
+<ParamField path="curator" type="address">
+  The curator who can submit timelocked configuration changes
+</ParamField>
+
+<ParamField path="receiveSharesGate" type="address">
+  Gate contract that controls who can receive vault shares (address(0) disables)
+</ParamField>
+
+<ParamField path="sendSharesGate" type="address">
+  Gate contract that controls who can send vault shares (address(0) disables)
+</ParamField>
+
+<ParamField path="receiveAssetsGate" type="address">
+  Gate contract that controls who can receive assets from the vault (address(0) disables)
+</ParamField>
+
+<ParamField path="sendAssetsGate" type="address">
+  Gate contract that controls who can send assets to the vault (address(0) disables)
+</ParamField>
+
+<ParamField path="adapterRegistry" type="address">
+  Registry contract that validates adapters (address(0) allows any adapter)
+</ParamField>
+
+<ParamField path="isSentinel" type="mapping(address => bool)">
+  Mapping of accounts that have sentinel privileges (can revoke timelocked operations and decrease caps)
+</ParamField>
+
+<ParamField path="isAllocator" type="mapping(address => bool)">
+  Mapping of accounts that can allocate assets across adapters
+</ParamField>
+
+### Token storage
+
+<ParamField path="name" type="string">
+  The name of the vault token
+</ParamField>
+
+<ParamField path="symbol" type="string">
+  The symbol of the vault token
+</ParamField>
+
+<ParamField path="totalSupply" type="uint256">
+  Total supply of vault shares (excludes unminted fee shares)
+</ParamField>
+
+<ParamField path="balanceOf" type="mapping(address => uint256)">
+  Mapping of account balances
+</ParamField>
+
+<ParamField path="allowance" type="mapping(address => mapping(address => uint256))">
+  Mapping of spending allowances
+</ParamField>
+
+<ParamField path="nonces" type="mapping(address => uint256)">
+  Nonces for ERC-2612 permit functionality
+</ParamField>
+
+### Interest storage
+
+<ParamField path="firstTotalAssets" type="uint256">
+  Total assets after first interest accrual in the current transaction (transient storage)
+</ParamField>
+
+<ParamField path="_totalAssets" type="uint128">
+  Last recorded total assets (use totalAssets() for current value)
+</ParamField>
+
+<ParamField path="lastUpdate" type="uint64">
+  Timestamp of last interest accrual
+</ParamField>
+
+<ParamField path="maxRate" type="uint64">
+  Maximum rate at which share price can increase per second (in WAD)
+</ParamField>
+
+### Curation storage
+
+<ParamField path="isAdapter" type="mapping(address => bool)">
+  Mapping of enabled adapters
+</ParamField>
+
+<ParamField path="adapters" type="address[]">
+  Array of adapter addresses
+</ParamField>
+
+<ParamField path="forceDeallocatePenalty" type="mapping(address => uint256)">
+  Penalty (in WAD) for force deallocating from each adapter
+</ParamField>
+
+### Liquidity adapter storage
+
+<ParamField path="liquidityAdapter" type="address">
+  Adapter used for deposits and withdrawals
+</ParamField>
+
+<ParamField path="liquidityData" type="bytes">
+  Data passed to the liquidity adapter
+</ParamField>
+
+### Timelock storage
+
+<ParamField path="timelock" type="mapping(bytes4 => uint256)">
+  Timelock duration for each function selector
+</ParamField>
+
+<ParamField path="abdicated" type="mapping(bytes4 => bool)">
+  Functions that have been permanently disabled
+</ParamField>
+
+<ParamField path="executableAt" type="mapping(bytes => uint256)">
+  Timestamp when each timelocked operation can be executed
+</ParamField>
+
+### Fee storage
+
+<ParamField path="performanceFee" type="uint96">
+  Performance fee in WAD (max 50%)
+</ParamField>
+
+<ParamField path="performanceFeeRecipient" type="address">
+  Recipient of performance fees
+</ParamField>
+
+<ParamField path="managementFee" type="uint96">
+  Management fee per second in WAD (max 5% APR)
+</ParamField>
+
+<ParamField path="managementFeeRecipient" type="address">
+  Recipient of management fees
+</ParamField>
+
+## View functions
+
+### adaptersLength
+
+```solidity
+function adaptersLength() external view returns (uint256)
+```
+
+Returns the number of adapters.
+
+<ResponseField name="" type="uint256">
+  The length of the adapters array
+</ResponseField>
+
+### totalAssets
+
+```solidity
+function totalAssets() external view returns (uint256)
+```
+
+Returns the total assets managed by the vault after accruing interest.
+
+<ResponseField name="" type="uint256">
+  The current total assets including accrued interest
+</ResponseField>
+
+### DOMAIN_SEPARATOR
+
+```solidity
+function DOMAIN_SEPARATOR() public view returns (bytes32)
+```
+
+Returns the EIP-712 domain separator for permit signatures.
+
+<ResponseField name="" type="bytes32">
+  The domain separator hash
+</ResponseField>
+
+### absoluteCap
+
+```solidity
+function absoluteCap(bytes32 id) external view returns (uint256)
+```
+
+Returns the absolute cap for a given allocation ID.
+
+<ParamField path="id" type="bytes32">
+  The allocation ID (keccak256 hash of idData)
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The absolute cap in asset units
+</ResponseField>
+
+### relativeCap
+
+```solidity
+function relativeCap(bytes32 id) external view returns (uint256)
+```
+
+Returns the relative cap for a given allocation ID.
+
+<ParamField path="id" type="bytes32">
+  The allocation ID
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The relative cap in WAD (relative to firstTotalAssets)
+</ResponseField>
+
+### allocation
+
+```solidity
+function allocation(bytes32 id) external view returns (uint256)
+```
+
+Returns the current allocation for a given ID.
+
+<ParamField path="id" type="bytes32">
+  The allocation ID
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The current allocation amount
+</ResponseField>
+
+### accrueInterestView
+
+```solidity
+function accrueInterestView() public view returns (uint256, uint256, uint256)
+```
+
+Calculates accrued interest and fees without updating state.
+
+<ResponseField name="newTotalAssets" type="uint256">
+  The total assets after interest accrual
+</ResponseField>
+
+<ResponseField name="performanceFeeShares" type="uint256">
+  Shares to mint for performance fees
+</ResponseField>
+
+<ResponseField name="managementFeeShares" type="uint256">
+  Shares to mint for management fees
+</ResponseField>
+
+### previewDeposit
+
+```solidity
+function previewDeposit(uint256 assets) public view returns (uint256)
+```
+
+Previews the number of shares that would be minted for a deposit.
+
+<ParamField path="assets" type="uint256">
+  The amount of assets to deposit
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The number of shares that would be minted
+</ResponseField>
+
+### previewMint
+
+```solidity
+function previewMint(uint256 shares) public view returns (uint256)
+```
+
+Previews the amount of assets required to mint a given number of shares.
+
+<ParamField path="shares" type="uint256">
+  The number of shares to mint
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The amount of assets required
+</ResponseField>
+
+### previewWithdraw
+
+```solidity
+function previewWithdraw(uint256 assets) public view returns (uint256)
+```
+
+Previews the number of shares that would be burned for a withdrawal.
+
+<ParamField path="assets" type="uint256">
+  The amount of assets to withdraw
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The number of shares that would be burned
+</ResponseField>
+
+### previewRedeem
+
+```solidity
+function previewRedeem(uint256 shares) public view returns (uint256)
+```
+
+Previews the amount of assets that would be withdrawn for redeeming shares.
+
+<ParamField path="shares" type="uint256">
+  The number of shares to redeem
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The amount of assets that would be withdrawn
+</ResponseField>
+
+### convertToShares
+
+```solidity
+function convertToShares(uint256 assets) external view returns (uint256)
+```
+
+Converts assets to shares (rounded down), accounting for fees.
+
+<ParamField path="assets" type="uint256">
+  The amount of assets
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The equivalent number of shares
+</ResponseField>
+
+### convertToAssets
+
+```solidity
+function convertToAssets(uint256 shares) external view returns (uint256)
+```
+
+Converts shares to assets (rounded down), accounting for fees.
+
+<ParamField path="shares" type="uint256">
+  The number of shares
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  The equivalent amount of assets
+</ResponseField>
+
+### maxDeposit
+
+```solidity
+function maxDeposit(address) external pure returns (uint256)
+```
+
+Returns the maximum deposit amount (always 0 due to gate uncertainty).
+
+<ResponseField name="" type="uint256">
+  Always returns 0
+</ResponseField>
+
+### maxMint
+
+```solidity
+function maxMint(address) external pure returns (uint256)
+```
+
+Returns the maximum mint amount (always 0 due to gate uncertainty).
+
+<ResponseField name="" type="uint256">
+  Always returns 0
+</ResponseField>
+
+### maxWithdraw
+
+```solidity
+function maxWithdraw(address) external pure returns (uint256)
+```
+
+Returns the maximum withdrawal amount (always 0 due to gate uncertainty).
+
+<ResponseField name="" type="uint256">
+  Always returns 0
+</ResponseField>
+
+### maxRedeem
+
+```solidity
+function maxRedeem(address) external pure returns (uint256)
+```
+
+Returns the maximum redeem amount (always 0 due to gate uncertainty).
+
+<ResponseField name="" type="uint256">
+  Always returns 0
+</ResponseField>
+
+### canReceiveShares
+
+```solidity
+function canReceiveShares(address account) public view returns (bool)
+```
+
+Checks if an account can receive vault shares.
+
+<ParamField path="account" type="address">
+  The account to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account can receive shares
+</ResponseField>
+
+### canSendShares
+
+```solidity
+function canSendShares(address account) public view returns (bool)
+```
+
+Checks if an account can send vault shares.
+
+<ParamField path="account" type="address">
+  The account to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account can send shares
+</ResponseField>
+
+### canReceiveAssets
+
+```solidity
+function canReceiveAssets(address account) public view returns (bool)
+```
+
+Checks if an account can receive assets from the vault.
+
+<ParamField path="account" type="address">
+  The account to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account can receive assets (vault itself is always allowed)
+</ResponseField>
+
+### canSendAssets
+
+```solidity
+function canSendAssets(address account) public view returns (bool)
+```
+
+Checks if an account can send assets to the vault.
+
+<ParamField path="account" type="address">
+  The account to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the account can send assets
+</ResponseField>
+
+## Constructor
+
+```solidity
+constructor(address _owner, address _asset)
+```
+
+Initializes a new VaultV2 instance.
+
+<ParamField path="_owner" type="address">
+  The initial owner of the vault
+</ParamField>
+
+<ParamField path="_asset" type="address">
+  The underlying ERC-20 asset address
+</ParamField>
+
+## Public functions
+
+### multicall
+
+```solidity
+function multicall(bytes[] calldata data) external
+```
+
+Executes multiple calls in a single transaction using delegatecall.
+
+<ParamField path="data" type="bytes[]">
+  Array of encoded function calls
+</ParamField>
+
+### accrueInterest
+
+```solidity
+function accrueInterest() public
+```
+
+Accrues interest and mints fee shares. Called automatically on first interaction per transaction.
+
+## Owner functions
+
+These functions can only be called by the vault owner.
+
+### setOwner
+
+```solidity
+function setOwner(address newOwner) external
+```
+
+Sets a new owner.
+
+<ParamField path="newOwner" type="address">
+  The address of the new owner
+</ParamField>
+
+### setCurator
+
+```solidity
+function setCurator(address newCurator) external
+```
+
+Sets a new curator.
+
+<ParamField path="newCurator" type="address">
+  The address of the new curator
+</ParamField>
+
+### setIsSentinel
+
+```solidity
+function setIsSentinel(address account, bool newIsSentinel) external
+```
+
+Grants or revokes sentinel role.
+
+<ParamField path="account" type="address">
+  The account to update
+</ParamField>
+
+<ParamField path="newIsSentinel" type="bool">
+  True to grant sentinel role, false to revoke
+</ParamField>
+
+### setName
+
+```solidity
+function setName(string memory newName) external
+```
+
+Sets the vault token name.
+
+<ParamField path="newName" type="string">
+  The new token name
+</ParamField>
+
+### setSymbol
+
+```solidity
+function setSymbol(string memory newSymbol) external
+```
+
+Sets the vault token symbol.
+
+<ParamField path="newSymbol" type="string">
+  The new token symbol
+</ParamField>
+
+## Timelock functions
+
+These functions manage the timelock system for curator functions.
+
+### submit
+
+```solidity
+function submit(bytes calldata data) external
+```
+
+Submits a timelocked operation. Can only be called by the curator.
+
+<ParamField path="data" type="bytes">
+  The encoded function call data
+</ParamField>
+
+### revoke
+
+```solidity
+function revoke(bytes calldata data) external
+```
+
+Revokes a pending timelocked operation. Can be called by curator or sentinels.
+
+<ParamField path="data" type="bytes">
+  The encoded function call data to revoke
+</ParamField>
+
+## Curator functions
+
+These functions are timelocked and can only be executed by the curator after the timelock expires.
+
+### setIsAllocator
+
+```solidity
+function setIsAllocator(address account, bool newIsAllocator) external
+```
+
+Grants or revokes allocator role (timelocked).
+
+<ParamField path="account" type="address">
+  The account to update
+</ParamField>
+
+<ParamField path="newIsAllocator" type="bool">
+  True to grant allocator role, false to revoke
+</ParamField>
+
+### setReceiveSharesGate
+
+```solidity
+function setReceiveSharesGate(address newReceiveSharesGate) external
+```
+
+Sets the receive shares gate (timelocked).
+
+<ParamField path="newReceiveSharesGate" type="address">
+  The new gate address (address(0) to disable)
+</ParamField>
+
+### setSendSharesGate
+
+```solidity
+function setSendSharesGate(address newSendSharesGate) external
+```
+
+Sets the send shares gate (timelocked).
+
+<ParamField path="newSendSharesGate" type="address">
+  The new gate address (address(0) to disable)
+</ParamField>
+
+### setReceiveAssetsGate
+
+```solidity
+function setReceiveAssetsGate(address newReceiveAssetsGate) external
+```
+
+Sets the receive assets gate (timelocked).
+
+<ParamField path="newReceiveAssetsGate" type="address">
+  The new gate address (address(0) to disable)
+</ParamField>
+
+### setSendAssetsGate
+
+```solidity
+function setSendAssetsGate(address newSendAssetsGate) external
+```
+
+Sets the send assets gate (timelocked).
+
+<ParamField path="newSendAssetsGate" type="address">
+  The new gate address (address(0) to disable)
+</ParamField>
+
+### setAdapterRegistry
+
+```solidity
+function setAdapterRegistry(address newAdapterRegistry) external
+```
+
+Sets the adapter registry (timelocked). Validates existing adapters against the new registry.
+
+<ParamField path="newAdapterRegistry" type="address">
+  The new adapter registry address (address(0) to disable)
+</ParamField>
+
+### addAdapter
+
+```solidity
+function addAdapter(address account) external
+```
+
+Adds an adapter (timelocked). Validates against adapter registry if set.
+
+<ParamField path="account" type="address">
+  The adapter address to add
+</ParamField>
+
+### removeAdapter
+
+```solidity
+function removeAdapter(address account) external
+```
+
+Removes an adapter (timelocked).
+
+<ParamField path="account" type="address">
+  The adapter address to remove
+</ParamField>
+
+### increaseTimelock
+
+```solidity
+function increaseTimelock(bytes4 selector, uint256 newDuration) external
+```
+
+Increases the timelock duration for a function (timelocked).
+
+<ParamField path="selector" type="bytes4">
+  The function selector (cannot be decreaseTimelock)
+</ParamField>
+
+<ParamField path="newDuration" type="uint256">
+  The new timelock duration in seconds
+</ParamField>
+
+### decreaseTimelock
+
+```solidity
+function decreaseTimelock(bytes4 selector, uint256 newDuration) external
+```
+
+Decreases the timelock duration for a function (timelocked with the original function's timelock).
+
+<ParamField path="selector" type="bytes4">
+  The function selector (cannot be decreaseTimelock)
+</ParamField>
+
+<ParamField path="newDuration" type="uint256">
+  The new timelock duration in seconds
+</ParamField>
+
+### abdicate
+
+```solidity
+function abdicate(bytes4 selector) external
+```
+
+Permanently disables a timelocked function (timelocked).
+
+<ParamField path="selector" type="bytes4">
+  The function selector to abdicate
+</ParamField>
+
+### setPerformanceFee
+
+```solidity
+function setPerformanceFee(uint256 newPerformanceFee) external
+```
+
+Sets the performance fee (timelocked). Accrues interest before changing.
+
+<ParamField path="newPerformanceFee" type="uint256">
+  The new performance fee in WAD (max 0.5e18 = 50%)
+</ParamField>
+
+### setManagementFee
+
+```solidity
+function setManagementFee(uint256 newManagementFee) external
+```
+
+Sets the management fee (timelocked). Accrues interest before changing.
+
+<ParamField path="newManagementFee" type="uint256">
+  The new management fee per second in WAD (max 5% APR)
+</ParamField>
+
+### setPerformanceFeeRecipient
+
+```solidity
+function setPerformanceFeeRecipient(address newPerformanceFeeRecipient) external
+```
+
+Sets the performance fee recipient (timelocked). Accrues interest before changing.
+
+<ParamField path="newPerformanceFeeRecipient" type="address">
+  The new recipient address
+</ParamField>
+
+### setManagementFeeRecipient
+
+```solidity
+function setManagementFeeRecipient(address newManagementFeeRecipient) external
+```
+
+Sets the management fee recipient (timelocked). Accrues interest before changing.
+
+<ParamField path="newManagementFeeRecipient" type="address">
+  The new recipient address
+</ParamField>
+
+### increaseAbsoluteCap
+
+```solidity
+function increaseAbsoluteCap(bytes memory idData, uint256 newAbsoluteCap) external
+```
+
+Increases the absolute cap for an allocation ID (timelocked).
+
+<ParamField path="idData" type="bytes">
+  The allocation ID data (hashed to get the ID)
+</ParamField>
+
+<ParamField path="newAbsoluteCap" type="uint256">
+  The new absolute cap
+</ParamField>
+
+### decreaseAbsoluteCap
+
+```solidity
+function decreaseAbsoluteCap(bytes memory idData, uint256 newAbsoluteCap) external
+```
+
+Decreases the absolute cap for an allocation ID. Can be called by curator or sentinels (not timelocked for sentinels).
+
+<ParamField path="idData" type="bytes">
+  The allocation ID data
+</ParamField>
+
+<ParamField path="newAbsoluteCap" type="uint256">
+  The new absolute cap
+</ParamField>
+
+### increaseRelativeCap
+
+```solidity
+function increaseRelativeCap(bytes memory idData, uint256 newRelativeCap) external
+```
+
+Increases the relative cap for an allocation ID (timelocked).
+
+<ParamField path="idData" type="bytes">
+  The allocation ID data
+</ParamField>
+
+<ParamField path="newRelativeCap" type="uint256">
+  The new relative cap in WAD (max 1e18 = 100%)
+</ParamField>
+
+### decreaseRelativeCap
+
+```solidity
+function decreaseRelativeCap(bytes memory idData, uint256 newRelativeCap) external
+```
+
+Decreases the relative cap for an allocation ID. Can be called by curator or sentinels (not timelocked for sentinels).
+
+<ParamField path="idData" type="bytes">
+  The allocation ID data
+</ParamField>
+
+<ParamField path="newRelativeCap" type="uint256">
+  The new relative cap in WAD
+</ParamField>
+
+### setForceDeallocatePenalty
+
+```solidity
+function setForceDeallocatePenalty(address adapter, uint256 newForceDeallocatePenalty) external
+```
+
+Sets the penalty for force deallocating from an adapter (timelocked).
+
+<ParamField path="adapter" type="address">
+  The adapter address
+</ParamField>
+
+<ParamField path="newForceDeallocatePenalty" type="uint256">
+  The penalty in WAD (max 0.02e18 = 2%)
+</ParamField>
+
+## Allocator functions
+
+These functions can be called by accounts with the allocator role.
+
+### allocate
+
+```solidity
+function allocate(address adapter, bytes memory data, uint256 assets) external
+```
+
+Allocates assets to an adapter. Checks caps after allocation.
+
+<ParamField path="adapter" type="address">
+  The adapter address
+</ParamField>
+
+<ParamField path="data" type="bytes">
+  Data to pass to the adapter
+</ParamField>
+
+<ParamField path="assets" type="uint256">
+  Amount of assets to allocate
+</ParamField>
+
+### deallocate
+
+```solidity
+function deallocate(address adapter, bytes memory data, uint256 assets) external
+```
+
+Deallocates assets from an adapter. Can also be called by sentinels.
+
+<ParamField path="adapter" type="address">
+  The adapter address
+</ParamField>
+
+<ParamField path="data" type="bytes">
+  Data to pass to the adapter
+</ParamField>
+
+<ParamField path="assets" type="uint256">
+  Amount of assets to deallocate
+</ParamField>
+
+### setLiquidityAdapterAndData
+
+```solidity
+function setLiquidityAdapterAndData(address newLiquidityAdapter, bytes memory newLiquidityData) external
+```
+
+Sets the liquidity adapter and data used for deposits and withdrawals.
+
+<ParamField path="newLiquidityAdapter" type="address">
+  The new liquidity adapter address
+</ParamField>
+
+<ParamField path="newLiquidityData" type="bytes">
+  The data to pass to the liquidity adapter
+</ParamField>
+
+### setMaxRate
+
+```solidity
+function setMaxRate(uint256 newMaxRate) external
+```
+
+Sets the maximum rate at which the share price can increase. Accrues interest before changing.
+
+<ParamField path="newMaxRate" type="uint256">
+  The new max rate per second in WAD (max 200% APR)
+</ParamField>
+
+## User functions
+
+### deposit
+
+```solidity
+function deposit(uint256 assets, address onBehalf) external returns (uint256)
+```
+
+Deposits assets and mints shares.
+
+<ParamField path="assets" type="uint256">
+  Amount of assets to deposit
+</ParamField>
+
+<ParamField path="onBehalf" type="address">
+  Address to receive the shares
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  Number of shares minted
+</ResponseField>
+
+### mint
+
+```solidity
+function mint(uint256 shares, address onBehalf) external returns (uint256)
+```
+
+Mints exact shares by depositing assets.
+
+<ParamField path="shares" type="uint256">
+  Number of shares to mint
+</ParamField>
+
+<ParamField path="onBehalf" type="address">
+  Address to receive the shares
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  Amount of assets deposited
+</ResponseField>
+
+### withdraw
+
+```solidity
+function withdraw(uint256 assets, address receiver, address onBehalf) public returns (uint256)
+```
+
+Withdraws exact assets by burning shares.
+
+<ParamField path="assets" type="uint256">
+  Amount of assets to withdraw
+</ParamField>
+
+<ParamField path="receiver" type="address">
+  Address to receive the assets
+</ParamField>
+
+<ParamField path="onBehalf" type="address">
+  Address to burn shares from
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  Number of shares burned
+</ResponseField>
+
+### redeem
+
+```solidity
+function redeem(uint256 shares, address receiver, address onBehalf) external returns (uint256)
+```
+
+Redeems shares for assets.
+
+<ParamField path="shares" type="uint256">
+  Number of shares to redeem
+</ParamField>
+
+<ParamField path="receiver" type="address">
+  Address to receive the assets
+</ParamField>
+
+<ParamField path="onBehalf" type="address">
+  Address to burn shares from
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  Amount of assets withdrawn
+</ResponseField>
+
+### forceDeallocate
+
+```solidity
+function forceDeallocate(address adapter, bytes memory data, uint256 assets, address onBehalf) external returns (uint256)
+```
+
+Forces deallocation from an adapter and applies a penalty. Useful for exiting when liquidity is limited.
+
+<ParamField path="adapter" type="address">
+  The adapter to deallocate from
+</ParamField>
+
+<ParamField path="data" type="bytes">
+  Data to pass to the adapter
+</ParamField>
+
+<ParamField path="assets" type="uint256">
+  Amount of assets to deallocate
+</ParamField>
+
+<ParamField path="onBehalf" type="address">
+  Address to apply the penalty to
+</ParamField>
+
+<ResponseField name="" type="uint256">
+  Number of penalty shares withdrawn
+</ResponseField>
+
+## ERC-20 functions
+
+### transfer
+
+```solidity
+function transfer(address to, uint256 shares) external returns (bool)
+```
+
+Transfers shares to another address.
+
+<ParamField path="to" type="address">
+  The recipient address
+</ParamField>
+
+<ParamField path="shares" type="uint256">
+  Number of shares to transfer
+</ParamField>
+
+<ResponseField name="" type="bool">
+  Always returns true (reverts on failure)
+</ResponseField>
+
+### transferFrom
+
+```solidity
+function transferFrom(address from, address to, uint256 shares) external returns (bool)
+```
+
+Transfers shares from one address to another.
+
+<ParamField path="from" type="address">
+  The sender address
+</ParamField>
+
+<ParamField path="to" type="address">
+  The recipient address
+</ParamField>
+
+<ParamField path="shares" type="uint256">
+  Number of shares to transfer
+</ParamField>
+
+<ResponseField name="" type="bool">
+  Always returns true (reverts on failure)
+</ResponseField>
+
+### approve
+
+```solidity
+function approve(address spender, uint256 shares) external returns (bool)
+```
+
+Approves an address to spend shares.
+
+<ParamField path="spender" type="address">
+  The address to approve
+</ParamField>
+
+<ParamField path="shares" type="uint256">
+  Number of shares to approve
+</ParamField>
+
+<ResponseField name="" type="bool">
+  Always returns true (reverts on failure)
+</ResponseField>
+
+### permit
+
+```solidity
+function permit(address _owner, address spender, uint256 shares, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external
+```
+
+Approves spending via EIP-2612 signature.
+
+<ParamField path="_owner" type="address">
+  The token owner
+</ParamField>
+
+<ParamField path="spender" type="address">
+  The address to approve
+</ParamField>
+
+<ParamField path="shares" type="uint256">
+  Number of shares to approve
+</ParamField>
+
+<ParamField path="deadline" type="uint256">
+  Expiration timestamp
+</ParamField>
+
+<ParamField path="v" type="uint8">
+  Signature v parameter
+</ParamField>
+
+<ParamField path="r" type="bytes32">
+  Signature r parameter
+</ParamField>
+
+<ParamField path="s" type="bytes32">
+  Signature s parameter
+</ParamField>
+
+## Events
+
+### Constructor
+
+```solidity
+event Constructor(address indexed owner, address indexed asset)
+```
+
+Emitted when the vault is created.
+
+### SetOwner
+
+```solidity
+event SetOwner(address indexed newOwner)
+```
+
+Emitted when the owner is changed.
+
+### SetCurator
+
+```solidity
+event SetCurator(address indexed newCurator)
+```
+
+Emitted when the curator is changed.
+
+### SetIsSentinel
+
+```solidity
+event SetIsSentinel(address indexed account, bool newIsSentinel)
+```
+
+Emitted when a sentinel role is granted or revoked.
+
+### SetName
+
+```solidity
+event SetName(string newName)
+```
+
+Emitted when the token name is changed.
+
+### SetSymbol
+
+```solidity
+event SetSymbol(string newSymbol)
+```
+
+Emitted when the token symbol is changed.
+
+### Submit
+
+```solidity
+event Submit(bytes4 indexed selector, bytes data, uint256 executableAt)
+```
+
+Emitted when a timelocked operation is submitted.
+
+### Revoke
+
+```solidity
+event Revoke(address indexed sender, bytes4 indexed selector, bytes data)
+```
+
+Emitted when a timelocked operation is revoked.
+
+### Accept
+
+```solidity
+event Accept(bytes4 indexed selector, bytes data)
+```
+
+Emitted when a timelocked operation is executed.
+
+### SetIsAllocator
+
+```solidity
+event SetIsAllocator(address indexed account, bool newIsAllocator)
+```
+
+Emitted when an allocator role is granted or revoked.
+
+### SetReceiveSharesGate
+
+```solidity
+event SetReceiveSharesGate(address indexed newReceiveSharesGate)
+```
+
+Emitted when the receive shares gate is changed.
+
+### SetSendSharesGate
+
+```solidity
+event SetSendSharesGate(address indexed newSendSharesGate)
+```
+
+Emitted when the send shares gate is changed.
+
+### SetReceiveAssetsGate
+
+```solidity
+event SetReceiveAssetsGate(address indexed newReceiveAssetsGate)
+```
+
+Emitted when the receive assets gate is changed.
+
+### SetSendAssetsGate
+
+```solidity
+event SetSendAssetsGate(address indexed newSendAssetsGate)
+```
+
+Emitted when the send assets gate is changed.
+
+### SetAdapterRegistry
+
+```solidity
+event SetAdapterRegistry(address indexed newAdapterRegistry)
+```
+
+Emitted when the adapter registry is changed.
+
+### AddAdapter
+
+```solidity
+event AddAdapter(address indexed account)
+```
+
+Emitted when an adapter is added.
+
+### RemoveAdapter
+
+```solidity
+event RemoveAdapter(address indexed account)
+```
+
+Emitted when an adapter is removed.
+
+### IncreaseTimelock
+
+```solidity
+event IncreaseTimelock(bytes4 indexed selector, uint256 newDuration)
+```
+
+Emitted when a function's timelock duration is increased.
+
+### DecreaseTimelock
+
+```solidity
+event DecreaseTimelock(bytes4 indexed selector, uint256 newDuration)
+```
+
+Emitted when a function's timelock duration is decreased.
+
+### Abdicate
+
+```solidity
+event Abdicate(bytes4 indexed selector)
+```
+
+Emitted when a function is abdicated.
+
+### SetPerformanceFee
+
+```solidity
+event SetPerformanceFee(uint256 newPerformanceFee)
+```
+
+Emitted when the performance fee is changed.
+
+### SetPerformanceFeeRecipient
+
+```solidity
+event SetPerformanceFeeRecipient(address indexed newPerformanceFeeRecipient)
+```
+
+Emitted when the performance fee recipient is changed.
+
+### SetManagementFee
+
+```solidity
+event SetManagementFee(uint256 newManagementFee)
+```
+
+Emitted when the management fee is changed.
+
+### SetManagementFeeRecipient
+
+```solidity
+event SetManagementFeeRecipient(address indexed newManagementFeeRecipient)
+```
+
+Emitted when the management fee recipient is changed.
+
+### IncreaseAbsoluteCap
+
+```solidity
+event IncreaseAbsoluteCap(bytes32 indexed id, bytes idData, uint256 newAbsoluteCap)
+```
+
+Emitted when an absolute cap is increased.
+
+### DecreaseAbsoluteCap
+
+```solidity
+event DecreaseAbsoluteCap(address indexed sender, bytes32 indexed id, bytes idData, uint256 newAbsoluteCap)
+```
+
+Emitted when an absolute cap is decreased.
+
+### IncreaseRelativeCap
+
+```solidity
+event IncreaseRelativeCap(bytes32 indexed id, bytes idData, uint256 newRelativeCap)
+```
+
+Emitted when a relative cap is increased.
+
+### DecreaseRelativeCap
+
+```solidity
+event DecreaseRelativeCap(address indexed sender, bytes32 indexed id, bytes idData, uint256 newRelativeCap)
+```
+
+Emitted when a relative cap is decreased.
+
+### SetForceDeallocatePenalty
+
+```solidity
+event SetForceDeallocatePenalty(address indexed adapter, uint256 forceDeallocatePenalty)
+```
+
+Emitted when a force deallocate penalty is set.
+
+### Allocate
+
+```solidity
+event Allocate(address indexed sender, address indexed adapter, uint256 assets, bytes32[] ids, int256 change)
+```
+
+Emitted when assets are allocated to an adapter.
+
+### Deallocate
+
+```solidity
+event Deallocate(address indexed sender, address indexed adapter, uint256 assets, bytes32[] ids, int256 change)
+```
+
+Emitted when assets are deallocated from an adapter.
+
+### ForceDeallocate
+
+```solidity
+event ForceDeallocate(address indexed sender, address adapter, uint256 assets, address indexed onBehalf, bytes32[] ids, uint256 penaltyAssets)
+```
+
+Emitted when assets are force deallocated with a penalty.
+
+### SetLiquidityAdapterAndData
+
+```solidity
+event SetLiquidityAdapterAndData(address indexed sender, address indexed newLiquidityAdapter, bytes indexed newLiquidityData)
+```
+
+Emitted when the liquidity adapter and data are changed.
+
+### SetMaxRate
+
+```solidity
+event SetMaxRate(uint256 newMaxRate)
+```
+
+Emitted when the max rate is changed.
+
+### AccrueInterest
+
+```solidity
+event AccrueInterest(uint256 previousTotalAssets, uint256 newTotalAssets, uint256 performanceFeeShares, uint256 managementFeeShares)
+```
+
+Emitted when interest is accrued.
+
+### Deposit
+
+```solidity
+event Deposit(address indexed sender, address indexed onBehalf, uint256 assets, uint256 shares)
+```
+
+Emitted when assets are deposited.
+
+### Withdraw
+
+```solidity
+event Withdraw(address indexed sender, address indexed receiver, address indexed onBehalf, uint256 assets, uint256 shares)
+```
+
+Emitted when assets are withdrawn.
+
+### Transfer
+
+```solidity
+event Transfer(address indexed from, address indexed to, uint256 shares)
+```
+
+Emitted when shares are transferred.
+
+### Approval
+
+```solidity
+event Approval(address indexed owner, address indexed spender, uint256 shares)
+```
+
+Emitted when an approval is made.
+
+### AllowanceUpdatedByTransferFrom
+
+```solidity
+event AllowanceUpdatedByTransferFrom(address indexed owner, address indexed spender, uint256 shares)
+```
+
+Emitted when allowance is updated by transferFrom.
+
+### Permit
+
+```solidity
+event Permit(address indexed owner, address indexed spender, uint256 shares, uint256 nonce, uint256 deadline)
+```
+
+Emitted when a permit is used.
+
+## Errors
+
+The VaultV2 contract uses the following custom errors from ErrorsLib:
+
+- `Abdicated()` - Function has been abdicated
+- `AbsoluteCapExceeded()` - Allocation exceeds absolute cap
+- `AbsoluteCapNotDecreasing()` - New absolute cap is not decreasing
+- `AbsoluteCapNotIncreasing()` - New absolute cap is not increasing
+- `AutomaticallyTimelocked()` - Cannot modify timelock of decreaseTimelock
+- `CannotReceiveShares()` - Account cannot receive shares (gate restriction)
+- `CannotReceiveAssets()` - Account cannot receive assets (gate restriction)
+- `CannotSendShares()` - Account cannot send shares (gate restriction)
+- `CannotSendAssets()` - Account cannot send assets (gate restriction)
+- `DataAlreadyPending()` - Operation already submitted
+- `DataNotTimelocked()` - Operation not submitted for timelock
+- `FeeInvariantBroken()` - Fee recipient required when fee is non-zero
+- `FeeTooHigh()` - Fee exceeds maximum allowed
+- `InvalidSigner()` - Permit signature is invalid
+- `MaxRateTooHigh()` - Max rate exceeds allowed maximum
+- `NotAdapter()` - Address is not an approved adapter
+- `NotInAdapterRegistry()` - Adapter not in registry
+- `PenaltyTooHigh()` - Force deallocate penalty exceeds maximum
+- `PermitDeadlineExpired()` - Permit deadline has passed
+- `RelativeCapAboveOne()` - Relative cap exceeds 100%
+- `RelativeCapExceeded()` - Allocation exceeds relative cap
+- `RelativeCapNotDecreasing()` - New relative cap is not decreasing
+- `RelativeCapNotIncreasing()` - New relative cap is not increasing
+- `TimelockNotDecreasing()` - New timelock is not decreasing
+- `TimelockNotExpired()` - Timelock period has not expired
+- `TimelockNotIncreasing()` - New timelock is not increasing
+- `Unauthorized()` - Caller is not authorized
+- `ZeroAbsoluteCap()` - Cannot allocate to ID with zero absolute cap
+- `ZeroAddress()` - Address cannot be zero
+- `ZeroAllocation()` - Cannot deallocate from ID with zero allocation
+
+## Constants
+
+- `WAD` - 1e18 (used for fee and rate calculations)
+- `MAX_MAX_RATE` - 200% APR (maximum allowed maxRate)
+- `MAX_PERFORMANCE_FEE` - 0.5e18 (50%, maximum performance fee)
+- `MAX_MANAGEMENT_FEE` - 0.05e18 / 365 days (5% APR, maximum management fee)
+- `MAX_FORCE_DEALLOCATE_PENALTY` - 0.02e18 (2%, maximum force deallocate penalty)

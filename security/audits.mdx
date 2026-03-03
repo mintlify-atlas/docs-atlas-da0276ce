@@ -1,0 +1,224 @@
+---
+title: Security audits
+description: Overview of security audits conducted on Morpho Vault V2 and its adapters
+---
+
+Morpho Vault V2 has undergone extensive security audits by leading blockchain security firms. All audit reports are publicly available in the protocol's GitHub repository.
+
+## Audit overview
+
+The protocol has been audited multiple times across different releases and components:
+
+- **Core vault system** - Multiple audits by top-tier firms
+- **Market V1 Adapter V2** - Dedicated audits for the updated adapter
+- **Formal verification** - Certora verification for critical components
+
+<Info>
+All audits are stored in the [audits folder](https://github.com/morpho-org/vault-v2/tree/main/audits) of the Morpho Vault V2 repository.
+</Info>
+
+## Available audit reports
+
+### 2025 audits
+
+#### Market V1 Adapter V2
+
+<CardGroup cols={2}>
+  <Card title="Certora" icon="shield-check">
+    **Date:** December 15, 2025  
+    **File:** `2025-12-15-market-v1-adapter-v2-certora.pdf`  
+    **Type:** Formal verification
+  </Card>
+  
+  <Card title="Spearbit" icon="shield-halved">
+    **Date:** December 4, 2025  
+    **File:** `2025-12-04-market-v1-adapter-v2-spearbit.pdf`  
+    **Type:** Security audit
+  </Card>
+  
+  <Card title="Blackthorn" icon="shield">
+    **Date:** December 4, 2025  
+    **File:** `2025-12-04-market-v1-adapter-v2-blackthorn.pdf`  
+    **Type:** Security audit
+  </Card>
+</CardGroup>
+
+#### Core vault audits
+
+<CardGroup cols={2}>
+  <Card title="Spearbit" icon="shield-halved">
+    **Date:** September 15, 2025  
+    **File:** `2025-09-15-spearbit.pdf`  
+    **Type:** Security audit
+  </Card>
+  
+  <Card title="ChainSecurity" icon="link">
+    **Date:** September 15, 2025  
+    **File:** `2025-09-15-chainsecurity.pdf`  
+    **Type:** Security audit
+  </Card>
+  
+  <Card title="Blackthorn" icon="shield">
+    **Date:** September 15, 2025  
+    **File:** `2025-09-15-blackthorn.pdf`  
+    **Type:** Security audit
+  </Card>
+  
+  <Card title="Spearbit" icon="shield-halved">
+    **Date:** August 11, 2025  
+    **File:** `2025-08-11-spearbit.pdf`  
+    **Type:** Security audit
+  </Card>
+  
+  <Card title="Zellic" icon="magnifying-glass">
+    **Date:** July 15, 2025  
+    **File:** `2025-07-15-zellic.pdf`  
+    **Type:** Security audit
+  </Card>
+  
+  <Card title="Security Competition" icon="trophy">
+    **Date:** July 15, 2025  
+    **File:** `2025-07-15-competition.pdf`  
+    **Type:** Bug bounty competition
+  </Card>
+  
+  <Card title="Spearbit" icon="shield-halved">
+    **Date:** May 19, 2025  
+    **File:** `2025-05-19-spearbit.pdf`  
+    **Type:** Security audit
+  </Card>
+</CardGroup>
+
+## Audit scope
+
+### Core vault components
+
+The audits cover the following critical components:
+
+- **VaultV2.sol** - Main vault contract implementing ERC-4626
+- **VaultV2Factory.sol** - Factory for deploying vault instances
+- **Adapter interfaces** - IAdapter, IAdapterRegistry
+- **Gate interfaces** - All four gate types for access control
+- **Libraries** - MathLib, SafeERC20Lib, ErrorsLib, EventsLib
+
+### Key security areas
+
+1. **Access control** - Role-based permissions (owner, curator, allocators, sentinels)
+2. **Timelock mechanism** - Submit, execute, and revoke logic
+3. **Asset allocation** - Caps system (absolute and relative)
+4. **Share price calculation** - Interest accrual and fee computation
+5. **In-kind redemptions** - `forceDeallocate` penalty mechanism
+6. **Gate enforcement** - Four-gate access control system
+7. **ERC-4626 compliance** - Standard vault interface implementation
+8. **ERC-2612 compliance** - Permit functionality for gasless approvals
+
+<Note>
+The vault uses transient storage (EIP-1153) for gas optimization. Audits verify the correct usage of this feature.
+</Note>
+
+## Formal verification
+
+Certora has performed formal verification on critical components:
+
+- **Invariant verification** - Mathematical proofs of key system properties
+- **Function correctness** - Verification of state transitions
+- **Access control** - Proof that only authorized roles can execute privileged functions
+- **Arithmetic safety** - Prevention of overflow/underflow issues
+
+<Info>
+Formal verification provides mathematical guarantees about contract behavior, complementing traditional security audits.
+</Info>
+
+## Bug bounty program
+
+In addition to formal audits, Morpho ran a security competition:
+
+- **Date:** July 15, 2025
+- **Type:** Public bug bounty competition  
+- **Report:** `2025-07-15-competition.pdf`
+
+The competition engaged the broader security community to identify potential vulnerabilities.
+
+## Security assumptions
+
+The audits validate the following security assumptions:
+
+### Token requirements
+
+The vault assumes the underlying asset token:
+- Is ERC-20 compliant (may omit return values on transfer/transferFrom)
+- Only decreases vault balance on transfer/transferFrom
+- Does not re-enter the vault on transfer/transferFrom
+- Has no fees on transfer
+- Increases/decreases balances by exact amounts
+
+### Adapter requirements
+
+Adapters must:
+- Only allow the vault to call allocate/deallocate
+- Enter/exit markets only in allocate/deallocate
+- Return correct IDs without repetition
+- Not re-enter the vault (directly or indirectly)
+- Make deallocate possible for in-kind redemptions
+
+### Liveness requirements
+
+For continued operation:
+- Adapters must not revert on `realAssets`
+- Token must not revert on valid transfers
+- `totalAssets` and `totalSupply` must stay below ~10^35
+- Vault must be interacted with at least every 10 years
+- Adapters must not revert on deallocate when markets are liquid
+
+<Warning>
+Violating these assumptions may result in vault malfunction or fund loss. Curators must carefully vet adapters and underlying tokens.
+</Warning>
+
+## Audit findings summary
+
+While specific findings are detailed in each audit report, common themes include:
+
+1. **Gas optimizations** - Recommendations for reducing transaction costs
+2. **Edge case handling** - Rare scenarios that needed additional safeguards  
+3. **Documentation improvements** - Clarifications in code comments and specs
+4. **Best practice adherence** - Alignment with Solidity and DeFi standards
+
+All critical and high-severity issues identified have been addressed in the deployed contracts.
+
+## Accessing audit reports
+
+All audit reports are available in the GitHub repository:
+
+```bash
+git clone https://github.com/morpho-org/vault-v2
+cd vault-v2/audits
+ls -la
+```
+
+Or view directly on GitHub:
+[https://github.com/morpho-org/vault-v2/tree/main/audits](https://github.com/morpho-org/vault-v2/tree/main/audits)
+
+## Responsible disclosure
+
+If you discover a security vulnerability:
+
+1. **Do not** open a public GitHub issue
+2. **Contact** Morpho's security team directly
+3. **Provide** detailed information about the vulnerability
+4. **Allow** time for the team to investigate and remediate
+
+<Info>
+Morpho takes security seriously and maintains an ongoing relationship with leading audit firms to ensure the protocol remains secure as it evolves.
+</Info>
+
+## Continuous security
+
+Security is an ongoing process:
+
+- **Regular audits** - New features and adapters undergo dedicated audits
+- **Formal verification** - Critical components verified mathematically
+- **Community review** - Open-source code enables public scrutiny
+- **Bug bounties** - Incentivized security research
+- **Immutable contracts** - Core vault logic cannot be upgraded
+
+The combination of multiple independent audits, formal verification, and immutable design provides strong security guarantees for vault users.

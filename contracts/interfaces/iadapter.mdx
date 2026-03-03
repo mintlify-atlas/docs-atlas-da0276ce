@@ -1,0 +1,94 @@
+---
+title: IAdapter
+description: Interface for vault adapters that manage asset allocation strategies
+---
+
+# IAdapter
+
+Interface that all vault adapters must implement to integrate with Morpho Vault V2.
+
+```solidity
+interface IAdapter
+```
+
+## Functions
+
+### allocate
+
+```solidity
+function allocate(bytes memory data, uint256 assets, bytes4 selector, address sender)
+    external
+    returns (bytes32[] memory ids, int256 change);
+```
+
+Allocates assets to underlying markets or strategies.
+
+<ParamField name="data" type="bytes">
+  Adapter-specific data for the allocation operation
+</ParamField>
+
+<ParamField name="assets" type="uint256">
+  The amount of assets to allocate
+</ParamField>
+
+<ParamField name="selector" type="bytes4">
+  The function selector of the calling vault function
+</ParamField>
+
+<ParamField name="sender" type="address">
+  The address initiating the allocation
+</ParamField>
+
+<ResponseField name="ids" type="bytes32[]">
+  Array of market identifiers affected by the allocation
+</ResponseField>
+
+<ResponseField name="change" type="int256">
+  The net change in assets on the affected markets
+</ResponseField>
+
+### deallocate
+
+```solidity
+function deallocate(bytes memory data, uint256 assets, bytes4 selector, address sender)
+    external
+    returns (bytes32[] memory ids, int256 change);
+```
+
+Deallocates assets from underlying markets or strategies.
+
+<ParamField name="data" type="bytes">
+  Adapter-specific data for the deallocation operation
+</ParamField>
+
+<ParamField name="assets" type="uint256">
+  The amount of assets to deallocate
+</ParamField>
+
+<ParamField name="selector" type="bytes4">
+  The function selector of the calling vault function
+</ParamField>
+
+<ParamField name="sender" type="address">
+  The address initiating the deallocation
+</ParamField>
+
+<ResponseField name="ids" type="bytes32[]">
+  Array of market identifiers affected by the deallocation
+</ResponseField>
+
+<ResponseField name="change" type="int256">
+  The net change in assets on the affected markets
+</ResponseField>
+
+### realAssets
+
+```solidity
+function realAssets() external view returns (uint256 assets);
+```
+
+Returns the current value of all investments managed by the adapter.
+
+<ResponseField name="assets" type="uint256">
+  The total value of investments in underlying asset units
+</ResponseField>

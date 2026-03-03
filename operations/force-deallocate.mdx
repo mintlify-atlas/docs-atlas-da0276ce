@@ -1,0 +1,326 @@
+---
+title: Force deallocate mechanism
+description: Enable users to exit illiquid vaults using the force deallocate feature in Morpho Vault V2
+---
+
+## Overview
+
+The force deallocate mechanism allows any user to withdraw assets directly from vault markets by paying a penalty. This provides an "in-kind redemption" path when normal withdrawals are not possible due to insufficient idle liquidity.
+
+<Info>
+Force deallocate enables users to exit the vault even when markets are illiquid or the liquidity adapter cannot provide sufficient assets for normal withdrawals.
+</Info>
+
+## How it works
+
+The `forceDeallocate()` function combines deallocation from a market with a penalty withdrawal:
+
+```solidity
+function forceDeallocate(
+    address adapter,
+    bytes memory data,
+    uint256 assets,
+    address onBehalf
+) external returns (uint256 penaltyShares);
+```
+
+Source: `VaultV2.sol:834-843`
+
+## Process flow
+
+<Steps>
+  <Step title="Deallocate from market">
+    Assets are withdrawn from the specified adapter/market back to the vault.
+  </Step>
+  
+  <Step title="Calculate penalty">
+    A penalty is calculated based on the adapter's configured penalty rate.
+  </Step>
+  
+  <Step title="Withdraw penalty">
+    Shares are burned from `onBehalf` to cover the penalty, with assets returned to the vault.
+  </Step>
+  
+  <Step title="Return penalty shares">
+    The function returns the number of shares withdrawn as penalty.
+  </Step>
+</Steps>
+
+### Code flow
+
+```solidity
+function forceDeallocate(
+    address adapter,
+    bytes memory data,
+    uint256 assets,
+    address onBehalf
+) external returns (uint256) {
+    // Step 1: Deallocate assets from the adapter
+    bytes32[] memory ids = deallocateInternal(adapter, data, assets);
+    
+    // Step 2: Calculate penalty
+    uint256 penaltyAssets = assets.mulDivUp(forceDeallocatePenalty[adapter], WAD);
+    
+    // Step 3: Withdraw penalty (burns shares, returns assets to vault)
+    uint256 penaltyShares = withdraw(penaltyAssets, address(this), onBehalf);
+    
+    emit EventsLib.ForceDeallocate(msg.sender, adapter, assets, onBehalf, ids, penaltyAssets);
+    return penaltyShares;
+}
+```
+
+Source: `VaultV2.sol:834-843`
+
+## Penalty mechanism
+
+### Setting penalties
+
+The curator can configure a penalty rate per adapter through timelocked governance:
+
+```solidity
+function setForceDeallocatePenalty(
+    address adapter,
+    uint256 newForceDeallocatePenalty
+) external;
+```
+
+### Penalty limits
+
+```solidity
+MAX_FORCE_DEALLOCATE_PENALTY = 0.02e18;  // 2% maximum
+```
+
+Source: `ConstantsLib.sol:12`
+
+### Example penalty configuration
+
+```solidity
+// Set a 1% penalty for force deallocating from an adapter
+vault.setForceDeallocatePenalty(adapterAddress, 0.01e18);
+```
+
+<Warning>
+Penalties must not exceed 2% (0.02e18). Higher values will revert.
+</Warning>
+
+Source: `VaultV2.sol:566-571`
+
+## Penalty calculation
+
+The penalty is calculated on the deallocated assets and rounded up:
+
+```solidity
+penaltyAssets = assets.mulDivUp(forceDeallocatePenalty[adapter], WAD);
+```
+
+### Example
+
+```solidity
+// Force deallocate 1000 assets with 1% penalty
+uint256 deallocated = 1000;
+uint256 penalty = 0.01e18;  // 1%
+
+// Penalty assets = 1000 * 0.01e18 / 1e18 = 10 assets
+// User's shares are burned to cover 10 assets
+// Vault receives 10 assets back (doesn't leave the vault)
+```
+
+## Share price impact
+
+The penalty mechanism affects users but not the overall vault:
+
+```solidity
+// Before force deallocate:
+// Vault: 1000 assets, 1000 shares in market
+// User: 100 shares = 100 assets
+
+// User force deallocates 100 assets with 1% penalty:
+// - 100 assets move from market to vault
+// - User's ~1 share is burned for penalty
+// - Penalty assets stay in vault (increase share price slightly)
+
+// Result:
+// Vault: ~99 assets available for user
+// User: ~99 shares remaining  
+// Other users: Benefit from penalty (higher share price)
+```
+
+<Info>
+The penalty is taken as a withdrawal where assets are returned to the vault. Total assets decrease normally along with total supply, but the vault retains the penalty assets, creating a slight benefit for remaining shareholders.
+</Info>
+
+Source: `VaultV2.sol:826-831`
+
+## Use cases
+
+### Exiting illiquid vaults
+
+When the vault doesn't have enough idle assets and the liquidity adapter cannot provide liquidity:
+
+```solidity
+// Normal withdrawal fails due to insufficient liquidity
+// vault.withdraw(1000, user, user);  // Reverts
+
+// Force deallocate directly from a market
+vault.forceDeallocate(marketAdapter, "", 1000, user);
+// User pays penalty but can exit
+```
+
+### In-kind redemptions
+
+Users can redeem their position even when markets are temporarily illiquid:
+
+<Steps>
+  <Step title="Identify liquid market">
+    Find a market with sufficient liquidity for withdrawal.
+  </Step>
+  
+  <Step title="Calculate optimal amount">
+    Determine how much to force deallocate based on user's position and market liquidity.
+  </Step>
+  
+  <Step title="Execute force deallocate">
+    Call `forceDeallocate()` to withdraw from the market.
+  </Step>
+  
+  <Step title="Regular withdrawal">
+    Use normal `withdraw()` to claim the deallocated assets.
+  </Step>
+</Steps>
+
+### Optimal force deallocate amount
+
+For a user with A assets in a fully illiquid vault:
+
+```solidity
+// Optimal amount = min(marketLiquidity, A / (1 + penalty))
+// This ensures either:
+// - The market is fully drained, OR
+// - User has just enough to exit after penalty
+
+uint256 userAssets = vault.previewRedeem(userShares);
+uint256 penalty = vault.forceDeallocatePenalty(adapter);
+uint256 marketLiquidity = getMarketLiquidity(adapter);
+
+uint256 optimalAmount = min(
+    marketLiquidity,
+    userAssets.mulDivDown(WAD, WAD + penalty)
+);
+
+vault.forceDeallocate(adapter, "", optimalAmount, user);
+```
+
+Source: `VaultV2.sol:831-833`
+
+## Access control
+
+Any address can call `forceDeallocate()` on behalf of any other address that has given allowance:
+
+```solidity
+// User must have sufficient shares
+// Caller must have allowance if calling on behalf of another user
+vault.forceDeallocate(adapter, data, assets, onBehalf);
+```
+
+<Warning>
+The penalty shares are withdrawn from `onBehalf`, not `msg.sender`. Ensure the `onBehalf` address:
+- Has sufficient shares to cover the penalty
+- Has given approval if `msg.sender` is acting on their behalf
+</Warning>
+
+## Bypassing gates
+
+Force deallocate can work even when the vault is blocked by gates:
+
+```solidity
+// The vault itself (address(this)) is always allowed to receive assets
+// This means penalty assets can be returned to vault even if receiveAssetsGate blocks other addresses
+function canReceiveAssets(address account) public view returns (bool) {
+    return account == address(this) 
+        || receiveAssetsGate == address(0)
+        || IReceiveAssetsGate(receiveAssetsGate).canReceiveAssets(account);
+}
+```
+
+Source: `VaultV2.sol:930-933`, `ForceDeallocateTest.sol:67-88`
+
+## Example implementation
+
+### Complete force deallocate flow
+
+```solidity
+// Setup: User has 1000 shares, vault is illiquid
+uint256 userShares = vault.balanceOf(user);
+uint256 userAssets = vault.previewRedeem(userShares);
+
+// Check penalty for adapter
+uint256 penalty = vault.forceDeallocatePenalty(adapter);
+// penalty = 0.01e18 (1%)
+
+// Force deallocate 500 assets
+uint256 penaltyShares = vault.forceDeallocate(
+    adapter,
+    "",
+    500,
+    user
+);
+// penaltyShares ≈ 5 shares (500 * 1% converted to shares)
+
+// Now vault has 500 idle assets
+// User has ~995 shares remaining
+
+// User can now withdraw the deallocated assets minus penalty
+vault.withdraw(
+    500 - (500 * penalty / 1e18),  // ~495 assets
+    user,
+    user
+);
+```
+
+Source: `ForceDeallocateTest.sol:32-65`
+
+## Penalty as a deterrent
+
+The penalty mechanism serves important purposes:
+
+<Warning>
+Penalties discourage allocation manipulation. Without penalties, users could:
+- Force deallocate to bypass allocator decisions
+- Manipulate market allocations for their benefit
+- Extract value at the expense of other depositors
+</Warning>
+
+### Governance considerations
+
+When setting penalties:
+- Higher penalties deter abuse but make exits more expensive
+- Lower penalties make exits cheaper but increase manipulation risk  
+- Consider market liquidity and expected user needs
+- Different adapters can have different penalties based on risk
+
+Source: `VaultV2.sol:826-828`
+
+## Events
+
+Force deallocate emits a dedicated event:
+
+```solidity
+event ForceDeallocate(
+    address indexed sender,
+    address indexed adapter,
+    uint256 assets,
+    address indexed onBehalf,
+    bytes32[] ids,
+    uint256 penaltyAssets
+);
+```
+
+This allows tracking of:
+- Who initiated the force deallocate
+- Which adapter/market was used
+- How much was deallocated
+- Whose shares were penalized
+- Which IDs were affected
+- The penalty amount charged
+
+Source: `VaultV2.sol:841`

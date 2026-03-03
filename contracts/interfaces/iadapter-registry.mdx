@@ -1,0 +1,30 @@
+---
+title: IAdapterRegistry
+description: Interface for the adapter registry that validates adapter addresses
+---
+
+# IAdapterRegistry
+
+Interface for the adapter registry contract that maintains a whitelist of approved adapters.
+
+```solidity
+interface IAdapterRegistry
+```
+
+## Functions
+
+### isInRegistry
+
+```solidity
+function isInRegistry(address account) external view returns (bool);
+```
+
+Checks if an adapter address is registered and approved.
+
+<ParamField name="account" type="address">
+  The adapter address to check
+</ParamField>
+
+<ResponseField name="" type="bool">
+  True if the adapter is registered, false otherwise
+</ResponseField>
