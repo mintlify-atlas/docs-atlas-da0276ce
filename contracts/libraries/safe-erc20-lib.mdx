@@ -1,0 +1,151 @@
+---
+title: SafeERC20Lib
+description: Library for safe ERC20 token operations with proper error handling
+---
+
+# SafeERC20Lib
+
+A library providing safe wrappers around ERC20 token operations. It handles tokens that return `false` on failure, tokens that don't return a value, and validates that the target address contains code.
+
+## Overview
+
+Many ERC20 tokens have non-standard implementations that either:
+- Don't return a boolean value from `transfer`, `transferFrom`, or `approve`
+- Return `false` instead of reverting on failure
+- Have other quirks that break standard assumptions
+
+SafeERC20Lib ensures all these cases are handled correctly by checking return values and validating success.
+
+## Functions
+
+### safeTransfer
+
+```solidity
+function safeTransfer(address token, address to, uint256 value) internal
+```
+
+Safely transfers tokens from the current contract to a recipient.
+
+<ParamField path="token" type="address" required>
+  The ERC20 token contract address
+</ParamField>
+
+<ParamField path="to" type="address" required>
+  The recipient address
+</ParamField>
+
+<ParamField path="value" type="uint256" required>
+  The amount of tokens to transfer
+</ParamField>
+
+**Reverts with:**
+- `NoCode()` - If the token address has no contract code
+- `TransferReverted()` - If the transfer call reverted
+- `TransferReturnedFalse()` - If the transfer returned `false`
+
+### safeTransferFrom
+
+```solidity
+function safeTransferFrom(address token, address from, address to, uint256 value) internal
+```
+
+Safely transfers tokens from one address to another using the ERC20 allowance mechanism.
+
+<ParamField path="token" type="address" required>
+  The ERC20 token contract address
+</ParamField>
+
+<ParamField path="from" type="address" required>
+  The address to transfer tokens from (must have given approval)
+</ParamField>
+
+<ParamField path="to" type="address" required>
+  The recipient address
+</ParamField>
+
+<ParamField path="value" type="uint256" required>
+  The amount of tokens to transfer
+</ParamField>
+
+**Reverts with:**
+- `NoCode()` - If the token address has no contract code
+- `TransferFromReverted()` - If the transferFrom call reverted
+- `TransferFromReturnedFalse()` - If the transferFrom returned `false`
+
+### safeApprove
+
+```solidity
+function safeApprove(address token, address spender, uint256 value) internal
+```
+
+Safely approves a spender to transfer tokens on behalf of the current contract.
+
+<ParamField path="token" type="address" required>
+  The ERC20 token contract address
+</ParamField>
+
+<ParamField path="spender" type="address" required>
+  The address authorized to spend tokens
+</ParamField>
+
+<ParamField path="value" type="uint256" required>
+  The allowance amount
+</ParamField>
+
+**Reverts with:**
+- `NoCode()` - If the token address has no contract code
+- `ApproveReverted()` - If the approve call reverted
+- `ApproveReturnedFalse()` - If the approve returned `false`
+
+<Warning>
+Some tokens (like USDT) require the allowance to be set to 0 before changing it to a non-zero value. This library does not handle that case automatically. Set the allowance to 0 first if needed.
+</Warning>
+
+## Error handling
+
+All functions in this library:
+
+1. **Check for contract code** - Ensures the token address has code before attempting a call
+2. **Check call success** - Verifies the low-level call didn't revert
+3. **Check return value** - If a value is returned, verifies it decodes to `true`
+
+This three-layer check ensures compatibility with:
+- Standard ERC20 tokens that return `true` on success
+- Tokens that don't return any value (empty return data)
+- Tokens that return `false` on failure instead of reverting
+
+## Usage example
+
+```solidity
+import {SafeERC20Lib} from "./libraries/SafeERC20Lib.sol";
+
+contract MyVault {
+    using SafeERC20Lib for address;
+
+    function deposit(address token, uint256 amount) external {
+        // Safe transfer from user to vault
+        token.safeTransferFrom(msg.sender, address(this), amount);
+    }
+
+    function withdraw(address token, uint256 amount) external {
+        // Safe transfer from vault to user
+        token.safeTransfer(msg.sender, amount);
+    }
+
+    function approveSpender(address token, address spender, uint256 amount) external {
+        // Safe approval
+        token.safeApprove(spender, amount);
+    }
+}
+```
+
+## Related errors
+
+See [ErrorsLib](/contracts/libraries/errors-lib) for the error definitions:
+- `NoCode()`
+- `TransferReverted()`
+- `TransferReturnedFalse()`
+- `TransferFromReverted()`
+- `TransferFromReturnedFalse()`
+- `ApproveReverted()`
+- `ApproveReturnedFalse()`

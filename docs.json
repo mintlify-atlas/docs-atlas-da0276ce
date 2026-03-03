@@ -83,13 +83,16 @@
             "group": "Adapters",
             "pages": [
               "contracts/adapters/morpho-market-v1-adapter-v2",
-              "contracts/adapters/morpho-vault-v1-adapter"
+              "contracts/adapters/morpho-market-v1-adapter-v2-factory",
+              "contracts/adapters/morpho-vault-v1-adapter",
+              "contracts/adapters/morpho-vault-v1-adapter-factory"
             ]
           },
           {
             "group": "Interfaces",
             "pages": [
               "contracts/interfaces/ivault-v2",
+              "contracts/interfaces/ivault-v2-factory",
               "contracts/interfaces/iadapter",
               "contracts/interfaces/iadapter-registry",
               "contracts/interfaces/igate"
@@ -101,7 +104,14 @@
               "contracts/libraries/constants-lib",
               "contracts/libraries/errors-lib",
               "contracts/libraries/events-lib",
-              "contracts/libraries/math-lib"
+              "contracts/libraries/math-lib",
+              "contracts/libraries/safe-erc20-lib"
+            ]
+          },
+          {
+            "group": "Periphery",
+            "pages": [
+              "contracts/periphery/fee-wrapper-deployer"
             ]
           }
         ]

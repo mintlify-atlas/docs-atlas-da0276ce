@@ -1,0 +1,115 @@
+---
+title: MorphoVaultV1AdapterFactory
+description: Factory contract for deploying MorphoVaultV1Adapter instances
+---
+
+# MorphoVaultV1AdapterFactory
+
+Factory contract for deploying `MorphoVaultV1Adapter` instances. This factory enables VaultV2 contracts to wrap MetaMorpho (Morpho Vault V1) positions as adapters.
+
+## Overview
+
+The `MorphoVaultV1AdapterFactory` uses CREATE2 deployment with a fixed salt (`bytes32(0)`) to create deterministic adapter addresses. It tracks deployed adapters using a two-dimensional mapping structure that indexes by both parent vault and the underlying MetaMorpho vault.
+
+## State variables
+
+<ResponseField name="morphoVaultV1Adapter" type="mapping(address => mapping(address => address))">
+  Nested mapping that returns the adapter address for a given parent vault and MetaMorpho vault combination. Returns `address(0)` if no adapter exists.
+  
+  **Usage:** `morphoVaultV1Adapter[parentVault][morphoVaultV1]`
+</ResponseField>
+
+<ResponseField name="isMorphoVaultV1Adapter" type="mapping(address => bool)">
+  Returns `true` if an address is a MorphoVaultV1Adapter deployed by this factory.
+</ResponseField>
+
+## Functions
+
+### createMorphoVaultV1Adapter
+
+```solidity
+function createMorphoVaultV1Adapter(address parentVault, address morphoVaultV1) external returns (address)
+```
+
+Deploys a new `MorphoVaultV1Adapter` that connects a parent VaultV2 to an underlying MetaMorpho vault.
+
+<ParamField path="parentVault" type="address" required>
+  The VaultV2 address that will use this adapter
+</ParamField>
+
+<ParamField path="morphoVaultV1" type="address" required>
+  The MetaMorpho (Vault V1) address to wrap
+</ParamField>
+
+<ResponseField name="return" type="address">
+  The address of the newly deployed adapter
+</ResponseField>
+
+<Note>
+Each combination of parent vault and MetaMorpho vault can only have one adapter. Attempting to create a duplicate will revert during deployment.
+</Note>
+
+## Events
+
+### CreateMorphoVaultV1Adapter
+
+```solidity
+event CreateMorphoVaultV1Adapter(
+    address indexed parentVault,
+    address indexed morphoVaultV1,
+    address indexed adapter
+)
+```
+
+Emitted when a new adapter is deployed.
+
+## Usage example
+
+```solidity
+// Deploy factory
+MorphoVaultV1AdapterFactory factory = new MorphoVaultV1AdapterFactory();
+
+// Create adapter wrapping a MetaMorpho vault
+address adapter = factory.createMorphoVaultV1Adapter(
+    vaultV2Address,
+    metaMorphoVaultAddress
+);
+
+// Verify adapter was created
+assert(factory.isMorphoVaultV1Adapter(adapter));
+
+// Retrieve adapter address
+address existingAdapter = factory.morphoVaultV1Adapter(
+    vaultV2Address,
+    metaMorphoVaultAddress
+);
+```
+
+## Use cases
+
+### Fee wrapper vaults
+
+The most common use case is creating "fee wrapper" vaults that add a fee layer on top of existing MetaMorpho vaults:
+
+```solidity
+// Create VaultV2 that wraps an existing MetaMorpho vault
+address feeWrapper = vaultFactory.createVaultV2(owner, asset, salt);
+
+// Create adapter connecting to underlying MetaMorpho vault
+address adapter = morphoVaultV1AdapterFactory.createMorphoVaultV1Adapter(
+    feeWrapper,
+    underlyingMetaMorphoVault
+);
+
+// Configure fee wrapper to use the adapter
+IVaultV2(feeWrapper).addAdapter(adapter);
+IVaultV2(feeWrapper).setLiquidityAdapterAndData(adapter, hex"");
+```
+
+See [FeeWrapperDeployer](/contracts/periphery/fee-wrapper-deployer) for a complete implementation example.
+
+## Related contracts
+
+- [MorphoVaultV1Adapter](/contracts/adapters/morpho-vault-v1-adapter) - The adapter contract this factory deploys
+- [VaultV2](/contracts/vault-v2) - Parent vault that uses these adapters
+- [FeeWrapperDeployer](/contracts/periphery/fee-wrapper-deployer) - Example deployer using this factory

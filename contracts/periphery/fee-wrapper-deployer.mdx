@@ -1,0 +1,236 @@
+---
+title: FeeWrapperDeployer
+description: Example deployer for creating fee wrapper VaultV2 instances
+---
+
+# FeeWrapperDeployer
+
+An example deployer contract that creates "fee wrapper" VaultV2 instances. A fee wrapper is a VaultV2 that wraps an existing MetaMorpho vault (Vault V1) and allows charging additional performance or management fees on top of it.
+
+## Overview
+
+The FeeWrapperDeployer demonstrates a specific VaultV2 configuration pattern:
+
+- **Single adapter** - Uses only a `MorphoVaultV1Adapter` pointing to an underlying MetaMorpho vault
+- **Fixed underlying vault** - The adapter configuration is permanently locked (abdicated)
+- **Configurable fees** - Owner can set performance and management fees
+- **Automatic routing** - Deposits and withdrawals automatically flow through the underlying vault
+
+<Info>
+This is an **example implementation**, not the only way to configure a fee wrapper. You can customize the deployment process based on your requirements.
+</Info>
+
+## Fixed configuration
+
+The following aspects are permanently fixed after deployment:
+
+- `addAdapter` function is **abdicated** - Cannot add more adapters
+- `removeAdapter` function is **abdicated** - Cannot remove the adapter
+- Single `MorphoVaultV1Adapter` pointing to the child vault
+
+## Configurable aspects
+
+The vault owner retains control over:
+
+- Performance and management fees
+- Fee recipients
+- Timelocks for curator functions
+- Caps (absolute and relative)
+- Sentinels and allocators
+- Gates (receive/send shares and assets)
+- Max rate
+- Liquidity adapter and data
+- Name and symbol
+- Owner and curator addresses
+- Force deallocate penalties
+
+## Function
+
+### createFeeWrapper
+
+```solidity
+function createFeeWrapper(
+    address morphoVaultV2Factory,
+    address morphoVaultV1AdapterFactory,
+    address owner,
+    bytes32 salt,
+    address childVault
+) external returns (address)
+```
+
+Creates and configures a fee wrapper VaultV2.
+
+<ParamField path="morphoVaultV2Factory" type="address" required>
+  The VaultV2Factory address for deploying the wrapper vault
+</ParamField>
+
+<ParamField path="morphoVaultV1AdapterFactory" type="address" required>
+  The MorphoVaultV1AdapterFactory address for creating the adapter
+</ParamField>
+
+<ParamField path="owner" type="address" required>
+  The address that will receive ownership and control of the fee wrapper
+</ParamField>
+
+<ParamField path="salt" type="bytes32" required>
+  Salt for CREATE2 deployment of the wrapper vault
+</ParamField>
+
+<ParamField path="childVault" type="address" required>
+  The underlying MetaMorpho vault address to wrap
+</ParamField>
+
+<ResponseField name="return" type="address">
+  The address of the newly deployed fee wrapper vault
+</ResponseField>
+
+## Deployment process
+
+The `createFeeWrapper` function performs these steps:
+
+<Steps>
+  <Step title="Deploy wrapper vault">
+    Creates a new VaultV2 with this contract as temporary owner for configuration
+  </Step>
+  
+  <Step title="Set curator">
+    Makes this contract the curator to enable configuration functions
+  </Step>
+  
+  <Step title="Create and add adapter">
+    - Creates a `MorphoVaultV1Adapter` for the child vault
+    - Submits and executes `addAdapter` transaction
+  </Step>
+  
+  <Step title="Abdicate adapter functions">
+    - Abdicates `addAdapter` - permanently prevents adding new adapters
+    - Abdicates `removeAdapter` - permanently prevents removing adapters
+  </Step>
+  
+  <Step title="Configure allocators">
+    - Adds deployer as temporary allocator
+    - Adds owner as allocator
+  </Step>
+  
+  <Step title="Set caps">
+    - Sets absolute cap to `type(uint128).max` (unlimited)
+    - Sets relative cap to `WAD` (100%)
+  </Step>
+  
+  <Step title="Configure liquidity">
+    - Sets the adapter as liquidity adapter
+    - Sets max rate to `MAX_MAX_RATE`
+  </Step>
+  
+  <Step title="Transfer ownership">
+    - Removes deployer as allocator
+    - Adds owner as sentinel
+    - Transfers curator role to owner
+    - Transfers ownership to owner
+  </Step>
+</Steps>
+
+## Usage example
+
+```solidity
+// Deploy the fee wrapper deployer
+FeeWrapperDeployer deployer = new FeeWrapperDeployer();
+
+// Create a fee wrapper for an existing MetaMorpho vault
+address feeWrapper = deployer.createFeeWrapper(
+    vaultV2FactoryAddress,
+    morphoVaultV1AdapterFactoryAddress,
+    ownerAddress,
+    keccak256("my-fee-wrapper"),
+    existingMetaMorphoVaultAddress
+);
+
+// Owner can now configure fees
+IVaultV2(feeWrapper).setPerformanceFee(0.1e18); // 10% performance fee
+IVaultV2(feeWrapper).setManagementFee(0.02e18); // 2% annual management fee
+```
+
+## Post-deployment configuration
+
+After deployment, the owner should:
+
+1. **Set fee parameters:**
+   ```solidity
+   vault.setPerformanceFee(performanceFeeWad);
+   vault.setManagementFee(managementFeeWad);
+   vault.setPerformanceFeeRecipient(feeRecipient);
+   vault.setManagementFeeRecipient(feeRecipient);
+   ```
+
+2. **Configure timelocks** (if desired):
+   ```solidity
+   vault.increaseTimelock(vault.setPerformanceFee.selector, 7 days);
+   vault.increaseTimelock(vault.setManagementFee.selector, 7 days);
+   ```
+
+3. **Set gates** (if needed for access control):
+   ```solidity
+   vault.setReceiveSharesGate(gateAddress);
+   vault.setSendAssetsGate(gateAddress);
+   ```
+
+4. **Customize metadata:**
+   ```solidity
+   vault.setName("Fee Wrapper USDC Vault");
+   vault.setSymbol("fwUSDC");
+   ```
+
+## Use cases
+
+### Protocol revenue generation
+
+Protocols can wrap existing high-performing MetaMorpho vaults and charge a small fee for providing a branded experience or additional services:
+
+```solidity
+// Wrap a popular USDC vault with 1% performance fee
+address protocolVault = deployer.createFeeWrapper(
+    factory,
+    adapterFactory,
+    protocolTreasury,
+    salt,
+    popularUSDCVault
+);
+
+IVaultV2(protocolVault).setPerformanceFee(0.01e18); // 1%
+IVaultV2(protocolVault).setPerformanceFeeRecipient(protocolTreasury);
+```
+
+### White-label vault products
+
+Create customized vault experiences on top of existing infrastructure:
+
+```solidity
+// Create white-label vault with custom branding
+address whitelabelVault = deployer.createFeeWrapper(
+    factory,
+    adapterFactory,
+    vaultOperator,
+    salt,
+    underlyingVault
+);
+
+IVaultV2(whitelabelVault).setName("Acme USDC Yield");
+IVaultV2(whitelabelVault).setReceiveSharesGate(kycGate);
+```
+
+## Security considerations
+
+<Warning>
+**Abdication is permanent** - Once `addAdapter` and `removeAdapter` are abdicated, the underlying vault cannot be changed. Ensure the child vault address is correct before deployment.
+</Warning>
+
+<Note>
+The deployer temporarily has allocator rights during deployment but removes itself before transferring ownership. The final owner starts with clean allocator permissions.
+</Note>
+
+## Related contracts
+
+- [VaultV2](/contracts/vault-v2) - The wrapper vault contract
+- [VaultV2Factory](/contracts/vault-v2-factory) - Factory for deploying vaults
+- [MorphoVaultV1Adapter](/contracts/adapters/morpho-vault-v1-adapter) - Adapter wrapping the child vault
+- [MorphoVaultV1AdapterFactory](/contracts/adapters/morpho-vault-v1-adapter-factory) - Factory for creating adapters

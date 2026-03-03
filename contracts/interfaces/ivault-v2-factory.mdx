@@ -1,0 +1,131 @@
+---
+title: IVaultV2Factory
+description: Interface for the VaultV2 factory contract
+---
+
+# IVaultV2Factory
+
+Interface for the `VaultV2Factory` contract, which handles deterministic deployment of VaultV2 instances using CREATE2.
+
+## Events
+
+### CreateVaultV2
+
+```solidity
+event CreateVaultV2(
+    address indexed owner,
+    address indexed asset,
+    bytes32 salt,
+    address indexed newVaultV2
+)
+```
+
+Emitted when a new VaultV2 is deployed.
+
+<ParamField path="owner" type="address">
+  The initial owner of the vault
+</ParamField>
+
+<ParamField path="asset" type="address">
+  The ERC20 asset token address
+</ParamField>
+
+<ParamField path="salt" type="bytes32">
+  The salt used for CREATE2 deployment
+</ParamField>
+
+<ParamField path="newVaultV2" type="address">
+  The address of the newly deployed vault
+</ParamField>
+
+## Functions
+
+### isVaultV2
+
+```solidity
+function isVaultV2(address account) external view returns (bool)
+```
+
+Checks if an address is a VaultV2 deployed by this factory.
+
+<ParamField path="account" type="address" required>
+  The address to check
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  `true` if the address is a VaultV2 from this factory, `false` otherwise
+</ResponseField>
+
+### vaultV2
+
+```solidity
+function vaultV2(address owner, address asset, bytes32 salt) external view returns (address)
+```
+
+Computes the deterministic address of a VaultV2 for given parameters without deploying it.
+
+<ParamField path="owner" type="address" required>
+  The owner parameter for the vault
+</ParamField>
+
+<ParamField path="asset" type="address" required>
+  The asset token address
+</ParamField>
+
+<ParamField path="salt" type="bytes32" required>
+  The salt for CREATE2 deployment
+</ParamField>
+
+<ResponseField name="return" type="address">
+  The predicted address where the vault would be deployed
+</ResponseField>
+
+### createVaultV2
+
+```solidity
+function createVaultV2(address owner, address asset, bytes32 salt) external returns (address newVaultV2)
+```
+
+Deploys a new VaultV2 instance using CREATE2.
+
+<ParamField path="owner" type="address" required>
+  The initial owner of the vault
+</ParamField>
+
+<ParamField path="asset" type="address" required>
+  The ERC20 asset token address for the vault
+</ParamField>
+
+<ParamField path="salt" type="bytes32" required>
+  The salt for deterministic addressing. Using the same parameters and salt will revert.
+</ParamField>
+
+<ResponseField name="newVaultV2" type="address">
+  The address of the newly deployed VaultV2
+</ResponseField>
+
+<Warning>
+Calling this function with the same `owner`, `asset`, and `salt` combination twice will revert because CREATE2 cannot deploy to the same address twice.
+</Warning>
+
+## Usage example
+
+```solidity
+IVaultV2Factory factory = IVaultV2Factory(factoryAddress);
+
+// Predict vault address before deployment
+bytes32 salt = keccak256("my-vault-v1");
+address predictedAddress = factory.vaultV2(owner, assetToken, salt);
+
+// Deploy the vault
+address vault = factory.createVaultV2(owner, assetToken, salt);
+assert(vault == predictedAddress);
+
+// Verify deployment
+bool isValid = factory.isVaultV2(vault);
+assert(isValid == true);
+```
+
+## Implementation
+
+See [VaultV2Factory](/contracts/vault-v2-factory) for the implementation details.
