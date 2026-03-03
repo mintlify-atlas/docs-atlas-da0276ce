@@ -1,0 +1,133 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "Morpho Vault V2",
+  "projectDescription": "Non-custodial DeFi vault infrastructure enabling asset allocation across multiple markets with advanced risk management.",
+  "theme": "aspen",
+  "primaryColor": "#5B54E8",
+  "lightColor": "#7C77F1",
+  "darkColor": "#4A44C7",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "architecture",
+              "key-features"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/vaults",
+              "concepts/adapters",
+              "concepts/roles",
+              "concepts/caps",
+              "concepts/timelocks",
+              "concepts/liquidity"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/factory",
+              "deployment/vault-creation",
+              "deployment/configuration"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/allocation",
+              "operations/liquidity-management",
+              "operations/fees",
+              "operations/force-deallocate"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "security/non-custodial-guarantees",
+              "security/gates",
+              "security/audits"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Contract Reference",
+        "groups": [
+          {
+            "group": "Core Contracts",
+            "pages": [
+              "contracts/vault-v2",
+              "contracts/vault-v2-factory"
+            ]
+          },
+          {
+            "group": "Adapters",
+            "pages": [
+              "contracts/adapters/morpho-market-v1-adapter-v2",
+              "contracts/adapters/morpho-vault-v1-adapter"
+            ]
+          },
+          {
+            "group": "Interfaces",
+            "pages": [
+              "contracts/interfaces/ivault-v2",
+              "contracts/interfaces/iadapter",
+              "contracts/interfaces/iadapter-registry",
+              "contracts/interfaces/igate"
+            ]
+          },
+          {
+            "group": "Libraries",
+            "pages": [
+              "contracts/libraries/constants-lib",
+              "contracts/libraries/errors-lib",
+              "contracts/libraries/events-lib",
+              "contracts/libraries/math-lib"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Non-custodial vault management with ERC-4626 compliance",
+    "Adapter-based allocation to multiple markets",
+    "Multi-role access control (Owner, Curator, Allocator, Sentinel)",
+    "Risk management with absolute and relative caps",
+    "Timelocked configuration changes for security",
+    "In-kind redemptions with force deallocate",
+    "Configurable gates for transfers and deposits",
+    "Performance and management fee system"
+  ],
+  "publicApiSurface": [
+    "VaultV2.deposit",
+    "VaultV2.withdraw",
+    "VaultV2.mint",
+    "VaultV2.redeem",
+    "VaultV2.allocate",
+    "VaultV2.deallocate",
+    "VaultV2.forceDeallocate",
+    "VaultV2.accrueInterest",
+    "VaultV2.setOwner",
+    "VaultV2.setCurator",
+    "VaultV2.addAdapter",
+    "VaultV2.removeAdapter",
+    "VaultV2.increaseAbsoluteCap",
+    "VaultV2.increaseRelativeCap",
+    "VaultV2Factory.createVault",
+    "IAdapter.allocate",
+    "IAdapter.deallocate",
+    "IAdapter.realAssets",
+    "MorphoMarketV1AdapterV2.allocate",
+    "MorphoMarketV1AdapterV2.deallocate",
+    "MorphoVaultV1Adapter.allocate",
+    "MorphoVaultV1Adapter.deallocate"
+  ]
+}
